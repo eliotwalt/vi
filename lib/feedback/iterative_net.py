@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch import nn
 from typing import Tuple, List, Dict, Optional, Union, Any
 from feedback_utils import pose_interpolation
+from torchvision.ops import box_iou
 
 class BaseIterativeNet(nn.Module):
     """
@@ -16,7 +17,7 @@ class BaseIterativeNet(nn.Module):
         feedback_loss_fn (Any): a callable to compute the loss function on the target and 
             predicted signals. kwargs must be "input" and "target" for predicted and target
             feedback respectively. 
-        (optional) interpolate_pose (bool): if true, the intermediary poses are linearly
+        (optional) interpolate_poses (bool): if true, the intermediary poses are linearly
             interpolated between initial and target poses, default=True
         (optional) feedback_fn (Any): a callable to compute the target feedback value. Only
             used when interpolate_poses=True
@@ -26,53 +27,32 @@ class BaseIterativeNet(nn.Module):
         net: nn.Module, 
         feedback_rate: float, 
         feedback_loss_fn: Any, 
-        interpolate_pose: Optional[bool]=True,
+        interpolate_poses: Optional[bool]=True,
         feedback_fn: Optional[Any]=None
     ):
-        assert not (feedback_fn==None and interpolate_pose), f'feedback_fn required when interpolate_pose=True'
+        assert not (feedback_fn==None and interpolate_poses), f'feedback_fn required when interpolate_poses=True'
         super().__init__()
         self.net = net
         self.feedback_rate = feedback_rate
         self.feedback_loss_fn = feedback_loss_fn
-        self.interpolate_pose = interpolate_pose
+        self.interpolate_poses = interpolate_poses
         self.feedback_fn = feedback_fn
 
     def batch_from_list(self, tensors: List[Tensor]):
         """
         BaseIterativeNet.batch_from_list: makes a batch from list of tensors and return list of shapes[0]
-            to invert operation with Tensor.split(pos_list)
+            to invert operation with Tensor.split(idx_list)
 
         Args:
             tensors (List[Tensor]): list of tensors to batch
         
         Returns:
             batch (Tensor): batched tensors
-            pos_list (List[int]): list of shapes[0] to reconstruct list
+            idx_list (List[int]): list of shapes[0] to reconstruct list
         """
-        pos_list = [t.shape[0] for t in tensors]
+        idx_list = [t.shape[0] for t in tensors]
         batch = torch.cat(tensors, dim=0)
-        return batch, pos_list
-
-    def batch_pose(self, pose: Union[Tensor, List[Tensor]], batch_size: int):
-        """
-        BaseIterativeNet.batch_pose: makes a batch from list of tensors and return list of shapes[0]
-            to invert operation with Tensor.split(pos_list)
-
-        Args:
-            pose (Union[Tensor[K, 3], List[Tensor[L, K, 3]]]): pose
-            batch_size (int): batch_size
-        
-        Returns:
-            batch (Tensor[batch_size, K, 3]): batch of poses
-        """
-        if isinstance(pose, list):
-            assert len(pose) == batch_size, f'if `pose` is list, it must have length {batch_size}, not {len(pose)}'
-            batch = torch.cat(pose, dim=0).reshape(batch_size, pose[0].shape[1], -1)
-        elif isinstance(pose, Tensor):
-            batch = torch.repeat(pose).reshape(batch_size, pose[0].shape[1], -1)
-        else:
-            raise TypeError(f'`pose` must be Tensor or List[Tensor], not {type(initial_pose)}.')
-        return batch
+        return batch, idx_list
 
     def preprocess_poses(self, poses: Tensor, features_dim: int):
         """
@@ -107,99 +87,111 @@ class BaseIterativeNet(nn.Module):
         raise NotImplementedError, f'No implementation of `forward_iteration` found.'
 
     def compute_loss(
-        self, feedbacks: Tensor, 
-        poses_batch: Tensor, 
-        target_poses: Tensor, 
-        it: Optional[int]=None, 
-        areas: Optional[List[Tensor]]=None
+        self, 
+        feedback: List[Tensor], 
+        target_feedback: List[Tensor], 
+        ious: List[Tensor]
     ):
         """
-        BaseIterativeNet.compute_loss: compute feedback loss
+        BaseIterativeNet.compute_loss: compute iou-weighted feedback loss
 
         Args:
-            feedback (Tensor[batch_size]): Tensor of feedback estimates
-            poses_batch (Tensor[batch_size, K, 3]): poses estimates
-            target_poses (Tensor[batch_size, K, 3]): poses targets
-            (optional) it (int): iteration number
-            (optional) areas (List[Tensor[L]]): List of M tensors containing the area of the 
-                bounding box of each detection
+            feedback (List[Tensor[L]]): list of predicted feedbacks (requires grad !)
+            target_feedback (List[Tensor[L']]): list of target feedbacks
+            ious (List[Tensor[L, L']]): pairwise ious between predictions and targets
 
         Returns:
-            loss (Tensor[1]): loss
+            loss (Tensor[1]): average feedback loss
         """
-        if self.interpolate_pose:
-            intermediary_pose = self.intermediary_poses[it]
-            target_feedback = self.feeback_fn(intermediary_poses, target_poses, areas)
-            target_poses = intermediary_poses
-        else:
-            target_feedback = self.default_feedback*torch.ones_like(feedback)
-        loss = self.feedback_loss_fn(feedback, target_feedback)
+        for i, pred_feedback in enumerate(feedback):
+            for j, true_feedback in enumerate(target_feedback):
+                loss = ious[i,j] * self.feedback_loss_fn(pred_feedback, true_feedback)
+                losses.append(loss)
+        loss = losses.mean()
         return loss
-
 
     def forward(
         self, 
-        features: List[Tensor], 
-        init_pose: Union[Tensor, List[Tensor]], 
+        detections: List[Dict[str, Tensor]], 
         num_iterations: int, 
-        targets: Optional[List[Tensor]]=None,
-        areas: Optional[List[Tensor]]=None,
+        targets: Optional[List[Dict[str, Tensor]]]=None
     ):
         """
         BaseIterativeNet.forward: forward pass
 
         Args:
-            features (List[Tensor[L, 256, D, D]]): list of M tensors corresponding to the feature 
-                maps associated to M images
-            init_pose (Union[Tensor[K, 3], List[Tensor[L, K, 3]]]): initial pose. If Tensor, it 
-                represent a generic pose to be with all features. If List[Tensor], it contains a
-                specific pose for each element of each features
+            detections (List[Dict[str, Tensor]]): List of M dictionaries containing detections 
+                attributes:
+                    - boxes (Tensor[L, 4]): coordinates of L bbox, formatted as [x0, y0, x1, y1]
+                    - features (Tensor[L, 256, D, D]): RoI feature maps
+                    - keypoints (Tensor[L, K, 3]): For each one of the L 
+                        objects, it contains the K keypoints in [x, y, visibility] format, defining the object.
+                    - others
             num_iterations (int): number of feedback iterations
-            (optional) targets (List[Tensor[L, K, 3]]): List of M tensors containing the target
-                poses for each objects.
-            (optional) areas (List[Tensor[L]]): List of M tensors containing the area of the 
-                bounding box of each detection
-            
+            (optional) targets (List[Dict[str, Tensor]]): List of dictionaries containing target 
+                attributes:
+                    - boxes (Tensor[L', 4]): coordinates of N bbox, formatted as [x0, y0, x1, y1]
+                    - keypoints (List[Tensor[L', K, 3]]): For each one of the L' objects, it 
+                        contains the K keypoints in [x, y, visibility] format, defining the object.
+                    - area (List[Tensor[1]]): area of bounding boxes
+                    - others
+        
         Returns:
-            poses (List[Tensor[L, K, 3]]): List of `num_iterations` tensors containing pose
-                estimates at each iteration.
-            feedbacks (List[Tensor[feedback_dim]]): List of `num_iterations` tensors containing
-                feedback signal estimates at each iteration.
-            (optional) losses (List[Tensor[*]]): List of `num_iterations` tensors containing
-		        losses
+            detections (List[Dict[str, Tensor]]): List of M dictionaries containing detections 
+                attributes:
+                    - keypoints (List[List[Tensor[L, K, 3]]]): List of `num_iterations+1` lists of L 
+                        keypoints estimates
+                    - feedbacks (List[List[Tensor[L]]]): list of `num_iterations` lists of L feedback 
+                        estimates
+                    - others
+            (optional) losses (List[Tensor[1]]): List of `num_iterations` averaged over batch losses
         """
-        # init
-        poses = []
-        feedbacks = []
+        # parse and initialize
+        features = [d['features'] for d in detections] # List[Tensor[L,256,D,D]]
+        poses = [[d['keypoints'] for d in detections]] # List[List[Tensor[L,K,3]]]
+        feedbacks = [] # List[List[Tensor[1]]]
         if not self.training:
-            target_poses, _ = self.batch_from_list(targets)
-            losses = []
-        if areas is not None:
-            areas = torch.cat(areas) # shape must be [batch_size]
-        # batch features into Tensor[L*M, 256, D, D]
-        features_batch, pos_list = self.batch_from_list(features)
-        batch_size = features_batch.shape[0] # = L*M
-        # turn init_pose into Tensor[L*M, K, 3]
-        poses_batch = self.batch_pose(init_pose, batch_size)
-        # create intermediary poses if interpolation required
-        if self.interpolate_pose:
-            self.intermediary_poses = pose_interpolation(poses_batch, target_poses, num_iterations)
+            target_poses = [t['keypoints'] for t in targets] # List[Tensor[L',K,3]]
+            target_areas = [t['area'] for t in targets] # List[Tensor[1]]
+            losses = [] # List[Tensor[1]]
+            boxes = [d['boxes'] for d in detections] # List[Tensor[L, 4]]
+            target_boxes = [t['boxes'] for t in detections] # List[Tensor[L', 4]]
+            ious = []
+            for pred_boxes in boxes:
+                for targ_boxes in target_boxes:
+                    ious.append(box_iou(pred_boxes, target_boxes)) # List[Tensor[L, L']]
+        # make batches
+        features_batch, idx_list = self.batch_from_list(features) # Tensor[L*M, 256, D, D]
+        poses_batch, _ = self.batch_from_list(poses[0]) # Tensor[L*M, K, 3]
+        if not self.training:
+            target_poses_batch, target_idx_list = self.batch_from_list(target_poses) # Tensor[L'*M, K, 3]
+        # create intermediary poses if necessary
+        if not self.training and self.interpolate_poses:
+            intermediary_poses = pose_interpolation(poses_batch, target_poses_batch, num_iterations)
         # iterative refinement
-        for it in range(num_iterations):
-            poses_batch, feedback = self.forward_iteration(features_batch, poses_batch)
-            poses.append(poses_batch)
-            feedbacks.append(feedback)
+        for iteration in range(num_iterations):
+            poses_batch, feedback_batch = self.forward_iteration(features_batch, poses_batch)
+            feedback_batch.squeeze(-1) # Tensor[L*M, 1] -> Tensor[L*M]
+            poses.append(poses_batch.split(idx_list, 0)) # Tensor[L*M, 256, D, D] -> List[Tensor[L, 256, D, D]]
+            feedbacks.append(feedback_batch.split(idx_list, 0)) # Tensor[L*M, K, 3] -> List[Tensor[L, K, 3]]
             if self.training:
-                loss = self.compute_loss(feedback, poses_batch, target_poses, it, areas)
+                # compute target feedback
+                if self.interpolate_poses:
+                    target_feedback_batch = self.feeback_fn(intermediary_poses_batch, intermediary_poses[iteration], target_areas).detach()
+                else:
+                    target_feedback_batch = self.default_feedback*torch.ones_like(feedback_batch).detach()
+                target_feedback = target_feedback_batch.split(target_idx_list, 0)
+                loss = self.compute_loss(feedbacks[-1], target_feedback, ious)
                 losses.append(loss)
-        # reindex
-        poses = list(poses.split(pos_list, 0))
-        feedbacks = list(feedbacks.split(pos_list, 0))
+        # complete detections
+        for detection in detections:
+            detection['keypoints'] = poses
+            detection['feedbacks'] = feedbacks
         # return
         if self.training:
-            return poses, feedbacks, losses
+            return detections, losses
         else:
-            return poses, feedbacks
+            return detections
 
 class EnergyAscentIterativeNet(BaseIterativeNet):
     """
@@ -211,7 +203,7 @@ class EnergyAscentIterativeNet(BaseIterativeNet):
         feedback_loss_fn (Any): a callable to compute the loss function on the target and 
             predicted signals. kwargs must be "input" and "target" for predicted and target
             feedback respectively
-        (optional) interpolate_pose (bool): if true, the intermediary poses are linearly
+        (optional) interpolate_poses (bool): if true, the intermediary poses are linearly
             interpolated between initial and target poses, default=True
         (optional) feedback_fn (Any): a callable to compute the target feedback value. Only
             used when interpolate_poses=True
@@ -223,14 +215,14 @@ class EnergyAscentIterativeNet(BaseIterativeNet):
         net: nn.Module, 
         feedback_rate: float, 
         feedback_loss_fn: Any, 
-        interpolate_pose: Optional[bool]=True,
+        interpolate_poses: Optional[bool]=True,
         feedback_fn: Optional[Any]=None,
         default_feedback: Optional[float]=1.
     ):
-        super().__init__(net, feedback_rate, feedback_loss_fn, interpolate_pose, feedback_fn)
+        super().__init__(net, feedback_rate, feedback_loss_fn, interpolate_poses, feedback_fn)
         self.default_feedback = default_feedback
     
-    def forward_ieration(self, features_batch, poses_batch):
+    def forward_iteration(self, features_batch: Tensor, poses_batch: Tensor):
         """
         EnergyAscentIterativeNet.forward_iteration: single iteration of energy ascent forward pass
 
@@ -264,7 +256,7 @@ class AdditiveIterativeNet(BaseIterativeNet):
         feedback_loss_fn (Any): a callable to compute the loss function on the target and 
             predicted signals. kwargs must be "input" and "target" for predicted and target
             feedback respectively
-        (optional) interpolate_pose (bool): if true, the intermediary poses are linearly
+        (optional) interpolate_poses (bool): if true, the intermediary poses are linearly
             interpolated between initial and target poses, default=True
         (optional) feedback_fn (Any): a callable to compute the target feedback value. Only
             used when interpolate_poses=True
@@ -276,14 +268,14 @@ class AdditiveIterativeNet(BaseIterativeNet):
         net: nn.Module, 
         feedback_rate: float, 
         feedback_loss_fn: Any, 
-        interpolate_pose: Optional[bool]=True,
+        interpolate_poses: Optional[bool]=True,
         feedback_fn: Optional[Any]=None,
         default_feedback: Optional[float]=0.
     ):
-        super().__init__(net, feedback_rate, feedback_loss_fn, interpolate_pose, feedback_fn)
+        super().__init__(net, feedback_rate, feedback_loss_fn, interpolate_poses, feedback_fn)
         self.default_feedback = default_feedback
 
-    def forward_ieration(self, features_batch, poses_batch):
+    def forward_iteration(self, features_batch: Tensor, poses_batch: Tensor):
         """
         AdditiveIterativeNet.forward_iteration: single iteration of energy ascent forward pass
 

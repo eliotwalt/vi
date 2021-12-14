@@ -158,11 +158,23 @@ def fasterrcnn_resnet50_fpn(pretrained=False, progress=True,
     if pretrained:
         # no need to download the backbone if pretrained is set
         pretrained_backbone = False
-    backbone = resnet_fpn_backbone('resnet50', pretrained_backbone, trainable_layers=trainable_backbone_layers)
+    backbone = resnet_fpn_backbone('resnet18', pretrained_backbone, trainable_layers=trainable_backbone_layers)
     model = FmFasterRCNN(backbone, num_classes, **kwargs)
     if pretrained:
-        state_dict = load_state_dict_from_url(model_urls['fasterrcnn_resnet50_fpn_coco'],
+        state_dict = load_state_dict_from_url(model_urls['fasterrcnn_resnet18_fpn_coco'],
                                               progress=progress)
         model.load_state_dict(state_dict)
         overwrite_eps(model, 0.0)
     return model
+
+def fasterrcnn_resnet_fpn(pretrained=True, num_classes=91, trainable_backbone_layers=None)
+
+
+"""
+def get_model(output_shape) :
+    model = models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
+    in_features = model.roi_heads.box_predictor.cls_score.in_features
+    model.roi_heads.box_predictor = models.detection.faster_rcnn.FastRCNNPredictor(in_features, output_shape)
+    
+    return model
+"""

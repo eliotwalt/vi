@@ -28,8 +28,8 @@ class ObjectSelector(object):
                     - boxes (Tensor[N, 4]): coordinates of N bbox, formatted as [x0, y0, x1, y1]
                     - labels (Int64Tensor[N]): the predicted labels for each detection
                     - scores (Tensor[N]): the scores of each detection
-            (optional) features (List[Tensor[N, 256, 7, 7]]): list of M backbone features corresponding to detections 
-                (RoIHeads outputs)
+                    - features (Tensor[N, 256, D, D]): RoI feature maps
+
 
         Returns:
             slct_detections (List[Dict[str, Tensor]]): List of M dictionaries containing selected 
@@ -40,8 +40,6 @@ class ObjectSelector(object):
                     - (if keypoint=True) keypoints (Tensor[L, K, 3]): For each one of the L 
                         objects, it contains the K keypoints in [x, y, visibility] format,
                         defining the object.
-            (optional) slct_features (List[Tensor[L, 256, 7, 7]]): list of M backbone features corresponding to detections 
-                (RoIHeads outputs)
         """
         slct_detections = [{k: [] for k in det.keys()} for det in detections]
         if features is not None: slct_features = [[] for _ in features]
@@ -53,8 +51,5 @@ class ObjectSelector(object):
                 mask_keep = torch.bitwise_and(mask_keep, detections[i]['labels']==label)
             for key in slct_detections[i].keys():
                 slct_detections[i][key] = detections[i][key][mask_keep]
-            if features is not None: 
-                slct_features[i] = features[i][mask_keep]
-        if features is None: return slct_detections
-        else: return slct_detections, slct_features
+        return slct_detections
         

@@ -27,21 +27,20 @@ class FmGeneralizedRCNN(nn.Module):
             images (List[Tensor]): List of M Tensors representing images
             (train mode) targets (List[Dict[str, Tensor]]): List of dictionaries containing target 
                 attributes:
-                    - boxes (Tensor[N, 4]): coordinates of N bbox, formatted as [x0, y0, x1, y1]
-                    - labels (Tensor[N]): label for each bbox. 0 is background
+                    - boxes (Tensor[L', 4]): coordinates of N bbox, formatted as [x0, y0, x1, y1]
+                    - labels (Tensor[L']): label for each bbox. 0 is background
                     - image_id (Tensor[1]): an image identifier. It should be unique between 
                         all the images in the dataset and is used during evaluation
-                    - iscrowd (Tensor[N]): instances with iscrowd=True will be ignored during 
+                    - iscrowd (Tensor[L']): instances with iscrowd=True will be ignored during 
                         evaluation
 
         Returns:
-            features (List[Tensor]): list of backbone features corresponding to detections 
-                (RoIHeads outputs)
             detections (List[Dict[str, Tensor]]): List of M dictionaries containing detections 
                 attributes:
                     - boxes (Tensor[N, 4]): coordinates of N bbox, formatted as [x0, y0, x1, y1]
                     - labels (Int64Tensor[N]): the predicted labels for each detection
                     - scores (Tensor[N]): the scores of each detection
+                    - features (Tensor[N, 256, D, D]): RoI feature maps
                     - (optional) keypoints (Tensor[N, K, 3]): For each one of the N objects, it 
                         contains the K keypoints in [x, y, visibility] format, defining the object. 			
             	        visibility=0 means that the keypoint is not visible. Note that for data 
@@ -91,11 +90,13 @@ class FmGeneralizedRCNN(nn.Module):
         proposals, proposal_losses = self.rpn(images, bckb_features, targets)
         detections, detector_losses, features = self.roi_heads(bckb_features, proposals, images.image_sizes, targets)
         detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)  # type: ignore[operator]
+        for detection, feature in zip(detections, features):
+            detection['features'] = feature
         losses = {}
         losses.update(detector_losses)
         losses.update(proposal_losses)
 
         if self.training:
-            return features, detections, losses
+            return detections, losses
         else:
-            return features, detections
+            return detections
