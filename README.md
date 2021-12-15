@@ -4,9 +4,9 @@ blabla
 
 ## Loss function for iterative net
 - in `iterative_net.py` at `compute_loss`, we compute the loss between the predicted feedbacks and the actual feedbacks.
-- Let $\hat{f}_i$, $f_j$, $\hat{b}_i$, $b_j$, $l$, $\text{IoU}(\cdot ,\cdot)$ and $\text{ng}(\cdot)$ be the i-th predicted feedback, the j-th true feedback, the i-th predicted box, the loss function, the intersection over union and the no gradient function (i.e `Tensor.detach()` or `torch.no_grad()`). The total objective is given by:
+- Let $\hat{f}_i$, $f_j$, $\hat{b}_i$, $b_j$, $\hat{v}_i$, $v_j$ l$, $$\text{IoU}(\cdot ,\cdot)$, $\text{bce}(\cdot, \cdot)$ and $\text{ng}(\cdot)$ be the i-th predicted feedback, the j-th true feedback, the i-th predicted box, the i-th predicted visibility, the j-th true visibility, the loss function, the intersection over union and the no gradient function (i.e `Tensor.detach()` or `torch.no_grad()`). The total objective is given by:
 $$
-\mathcal{L} = \frac{1}{\hat{N}N}\sum_{i=1}^{\hat{N}}\sum_{j=1}^{N}\text{IoU}(\text{ng}(\hat{b}_i), \text{ng}(b_j))\cdot l(\hat{f_i}, f_j)
+\mathcal{L} = \frac{1}{\hat{N}N}\sum_{i=1}^{\hat{N}}\sum_{j=1}^{N}\text{IoU}(\text{ng}(\hat{b}_i), \text{ng}(b_j))[l(\hat{f_i}, f_j)+\text{bce}(\hat{v}_i, v_i)]
 $$
 
 - The weighting by $\text{IoU}$ gives less importance to the boxes that don't overlap (or only a bit).

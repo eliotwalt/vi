@@ -39,14 +39,17 @@ class Oks(nn.Module):
         Returns:
             oks (Tensor[N]): oks values for each pose
         """
+        target_v = target_poses[:,:,2]
         dists = (input_poses[:,:,0:2] - target_poses[:,:,0:2])**2        
         dists = dists.sum(dim=-1)
         if len(areas.shape) < 2: areas = areas.unsqueeze(-1)
         dists = dists / (2*areas*self.weights**2)
-        oks = torch.exp(-dists).mean(1)
+        # filter visibilities
+        oks = torch.exp(-dists)*target_v
+        oks = oks.mean(1)
         return oks
 
-class SignedError(nn.Module):
+class KeypointSignedError(nn.Module):
     """
     SignedError: torch module to compute signed error between arbitrary tensors
     """
@@ -63,14 +66,17 @@ class SignedError(nn.Module):
         Oks.forward: forward pass
         
         Args:
-            input_tensor (Tensor[N, *]): input_tensor
-            target_tensor (Tensor[N, *]): target_tensor
+            input_tensor (Tensor[N, K, 3]): input_tensor
+            target_tensor (Tensor[N, K, 3]): target_tensor
             *args, **kwargs (Any): for compatibility
         
         Returns:
             signed_error (Tensor[N, *]): signed_error values for each position
         """
-        return target_tensor - input_tensor
+        target_v = target_poses[:,:,2]
+        signed_error = target_tensor - input_tensor
+        signed_error *= target_v
+        return signed_error
 
 class FeedbackResnet(nn.Module):
     """
@@ -87,7 +93,7 @@ class FeedbackResnet(nn.Module):
     """
     def __init__(
         self, 
-        in_channels: Optional[int]=284,
+        in_channels: Optional[int]=307,
         out_channels: Optional[int]=1,
         stride: Optional[int]=1, 
         num_blocks: Optional[int]=2,
@@ -112,6 +118,6 @@ class FeedbackResnet(nn.Module):
     def forward(self, x: Tensor):
         x = self.blocks(x)
         if self.energy_ascent:
-            x = x.reshape(-1,1)
+            x = F.sigmoid(x.reshape(-1,1))
         return x
 

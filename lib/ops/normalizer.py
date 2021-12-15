@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from typing import Tuple, List, Dict, Optional, Union
 
 def normalize(detections: List[Dict[str, Tensor]]):
-     """
+    """
     normalize: apply normalization
 
     Args:
@@ -32,7 +32,7 @@ def normalize(detections: List[Dict[str, Tensor]]):
     return normalized_detections
 
 def inverse_normalize(detections: List[Dict[str, Tensor]]):
-     """
+    """
     inverse_normalize: apply inverse normalization
 
     Args:

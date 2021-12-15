@@ -4,8 +4,8 @@ from torch import Tensor
 import torch.nn.functional as F
 from torch import nn
 from typing import Tuple, List, Dict, Optional, Union, Any
-from feedback_utils import pose_interpolation
 from torchvision.ops import box_iou
+from .feedback_utils import pose_interpolation
 
 class BaseIterativeNet(nn.Module):
     """
@@ -64,32 +64,31 @@ class BaseIterativeNet(nn.Module):
             features_dim (int): dimension of feature maps
 
         Returns:
-            features_poses (Tensor[batch_size, 2K, features_dim, features_dim]): preprocessed poses
-            visibilities (Tensor[batch_size, K, 1]): visibility component for each keypoints
+            features_poses (Tensor[batch_size, 3K, features_dim, features_dim]): preprocessed poses
         """
         batch_size, K, _ = poses.shape
         features_poses = []
         visibilities = []
         for keypoint in poses:
-            x, y = keypoint[:,0], keypoint[:,1]
-            visibilities.append(keypoint[:,2].unsqueeze(0))
+            x, y, v = keypoint[:,0], keypoint[:,1], keypoint[:,2]
             features = []
-            for x_val, y_val in zip(x, y):
+            for x_val, y_val, v_val in zip(x, y, v):
                 features.append(torch.full((1,1,features_dim,features_dim), x_val))
                 features.append(torch.full((1,1,features_dim,features_dim), y_val))
+                features.append(torch.full((1,1,features_dim,features_dim), v_val))
             features = torch.cat(features, dim=1)
             features_poses.append(features)
         features_poses = torch.cat(features_poses, dim=0)
-        visibilities = torch.cat(visibilities, dim=0).unsqueeze(-1)
-        return features_poses, visibilities
+        return features_poses
 
     def forward_iteration(self, features_batch, poses_batch):
-        raise NotImplementedError, f'No implementation of `forward_iteration` found.'
+        raise NotImplementedError(f'No implementation of `forward_iteration` found.')
 
     def compute_loss(
         self, 
         feedback: List[Tensor], 
-        target_feedback: List[Tensor], 
+        target_feedback: List[Tensor],
+        poses: List[Tensor],
         ious: List[Tensor]
     ):
         """
@@ -98,14 +97,18 @@ class BaseIterativeNet(nn.Module):
         Args:
             feedback (List[Tensor[L]]): list of predicted feedbacks (requires grad !)
             target_feedback (List[Tensor[L']]): list of target feedbacks
+            poses (List[Tensor[L, K, 3]]): list of predicted poses (requires grad !)
+            target_poses (List[Tensor[L', K, 3]]): list of target poses
             ious (List[Tensor[L, L']]): pairwise ious between predictions and targets
 
         Returns:
             loss (Tensor[1]): average feedback loss
         """
-        for i, pred_feedback in enumerate(feedback):
-            for j, true_feedback in enumerate(target_feedback):
-                loss = ious[i,j] * self.feedback_loss_fn(pred_feedback, true_feedback)
+        for i, (pred_feedback, pred_pose) in enumerate(feedback, poses):
+            pred_visibility = pred_pose[:,:,2]
+            for j, (true_feedback, true_pose) in enumerate(target_feedback, target_poses):
+                true_visibility = true_pose[:,:,2]
+                loss = ious[i,j] * (self.feedback_loss_fn(pred_feedback, true_feedback) + F.binary_cross_entropy(pred_visibility, true_visibility))
                 losses.append(loss)
         loss = losses.mean()
         return loss
@@ -177,11 +180,13 @@ class BaseIterativeNet(nn.Module):
             if self.training:
                 # compute target feedback
                 if self.interpolate_poses:
-                    target_feedback_batch = self.feeback_fn(intermediary_poses_batch, intermediary_poses[iteration], target_areas).detach()
+                    target_feedback_batch = self.feeback_fn(intermediary_poses[iteration], target_poses_batch, target_areas).detach()
+                    intermediary_poses = intermediary_poses[iteration].split(target_idx_list, 0)
                 else:
                     target_feedback_batch = self.default_feedback*torch.ones_like(feedback_batch).detach()
+                    intermediary_poses = target_poses_batch.split(target_idx_list, 0)
                 target_feedback = target_feedback_batch.split(target_idx_list, 0)
-                loss = self.compute_loss(feedbacks[-1], target_feedback, ious)
+                loss = self.compute_loss(feedbacks[-1], target_feedback, poses[-1], intermediary_poses, ious)
                 losses.append(loss)
         # complete detections
         for detection in detections:
@@ -234,16 +239,17 @@ class EnergyAscentIterativeNet(BaseIterativeNet):
             next_poses (Tensor[batch_size, K, 3]): Tensor of next poses estimates
             feedback (Tensor[batch_size]): Tensor of feedback estimates
         """
-        poses_features, visibilities = self.preprocess_poses(poses_batch, features_batch.shape[-1])
+        poses_features = self.preprocess_poses(poses_batch, features_batch.shape[-1])
         poses_features.requires_grad_(True)
         inp = torch.cat([features_batch, poses_features])
         feedback = self.net(inp)
         grad = torch.autograd.grad(feedback, poses_features)
         poses_features += self.feedback_rate*grad
         pooled_poses = F.avg_pool2d(poses_features, kernel_size=poses_features.shape[-1])
-        x = torch.cat([pooled_poses[:,i] for i in range(0, pooled_poses[1], 2)], dim=1)
-        y = torch.cat([pooled_poses[:,i] for i in range(1, pooled_poses[1]+1, 2)], dim=1)
-        next_poses = torch.cat([x, y, visibilities], dim=-1)
+        x = F.relu(torch.cat([pooled_poses[:,i] for i in range(0, pooled_poses[1], 3)], dim=1))
+        y = F.relu(torch.cat([pooled_poses[:,i] for i in range(1, pooled_poses[1]+1, 3)], dim=1))
+        v = F.sigmoid(torch.cat([pooled_poses[:,i] for i in range(2, pooled_poses[1]+1, 3)], dim=1))
+        next_poses = torch.cat([x, y, v], dim=-1)
         return next_poses, feedback
 
 class AdditiveIterativeNet(BaseIterativeNet):
@@ -287,12 +293,13 @@ class AdditiveIterativeNet(BaseIterativeNet):
             next_poses (Tensor[batch_size, K, 3]): Tensor of next poses estimates
             feedback (Tensor[batch_size]): Tensor of feedback estimates
         """
-        poses_features, visibilities = self.preprocess_poses(poses_batch, features_batch.shape[-1])
+        poses_features = self.preprocess_poses(poses_batch, features_batch.shape[-1])
         inp = torch.cat([features_batch, poses_features])
         feedback = self.net(inp)
         poses_features += self.feedback_rate*feedback
         pooled_poses = F.avg_pool2d(poses_features, kernel_size=poses_features.shape[-1])
-        x = torch.cat([pooled_poses[:,i] for i in range(0, pooled_poses[1], 2)], dim=1)
-        y = torch.cat([pooled_poses[:,i] for i in range(1, pooled_poses[1]+1, 2)], dim=1)
-        next_poses = torch.cat([x, y, visibilities], dim=-1)
+        x = F.relu(torch.cat([pooled_poses[:,i] for i in range(0, pooled_poses[1], 3)], dim=1))
+        y = F.relu(torch.cat([pooled_poses[:,i] for i in range(1, pooled_poses[1]+1, 3)], dim=1))
+        v = F.sigmoid(torch.cat([pooled_poses[:,i] for i in range(2, pooled_poses[1]+1, 3)], dim=1))
+        next_poses = torch.cat([x, y, v], dim=-1)
         return next_poses, feedback
