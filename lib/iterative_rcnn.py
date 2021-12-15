@@ -203,6 +203,9 @@ def get_model(
         num_conv_blocks_feedback (int): number of convolutional blocks in iter_net
         features_dim (int): dimension of feature maps
         dataset (str): dataset name
+    
+    returns:
+        IterativeGeneralizedRCNN instance
     """
     assert dataset=='coco', f'Only COCO is supported.'
     # rcnn
