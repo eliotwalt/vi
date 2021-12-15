@@ -55,17 +55,17 @@ def main():
                     else:
                         losses[k] = [l.detach().cpu() for l in loss]
                 train_losses.append(losses)
-        # validating
-        for val_images, val_targets in val_dataloader:
-            detections, losses = model(val_images, val_targets, num_iterations) # init_pose ??????
-            for k, loss in losses.items(): # add all losses to losses list
-                if not loss_key == 'feedbacks':
-                    losses[k] = loss.detach().cpu()
-                else:
-                    losses[k] = [l.detach().cpu() for l in loss]
-            val_losses.append(losses)
-        # print
-        print_losses(train_losses[-1], val_losses[-1], epoch, args.num_epochs)
+            # validating
+            for val_images, val_targets in val_dataloader:
+                detections, losses = model(val_images, val_targets, num_iterations) # init_pose ??????
+                for k, loss in losses.items(): # add all losses to losses list
+                    if not loss_key == 'feedbacks':
+                        losses[k] = loss.detach().cpu()
+                    else:
+                        losses[k] = [l.detach().cpu() for l in loss]
+                val_losses.append(losses)
+            # print
+            print_losses(train_losses[-1], val_losses[-1], epoch, args.num_epochs)
 
 if __name__ == '__main__':
     main()
