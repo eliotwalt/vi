@@ -9,11 +9,14 @@ from torchvision.models.resnet import *
 from torchvision.models.detection._utils import overwrite_eps
 from torchvision.models.detection.anchor_utils import AnchorGenerator
 from torchvision.models.detection.rpn import RPNHead, RegionProposalNetwork
-from torchvision.models.detection.faster_rcnn import TwoMLPHead, FastRCNNPredictor
+from torchvision.models.detection.faster_rcnn import TwoMLPHead, FastRCNNPredictor, model_urls
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
+from torchvision._internally_replaced_utils import load_state_dict_from_url
+from torchvision.models.detection.backbone_utils import resnet_fpn_backbone, _validate_trainable_layers
 from typing import Tuple, List, Dict, Optional, Union
 from .roi_heads import FmRoIHeads
 from .generalized_rcnn import FmGeneralizedRCNN
+import warnings
 
 class FmFasterRCNN(FmGeneralizedRCNN):
     def __init__(
@@ -147,34 +150,20 @@ class FmFasterRCNN(FmGeneralizedRCNN):
         """
         return super().forward(images, targets)
 
-
-from torchvision.models.detection.backbone_utils import resnet_fpn_backbone, _validate_trainable_layers
-
-def fasterrcnn_resnet50_fpn(pretrained=False, progress=True,
-                            num_classes=91, pretrained_backbone=True, trainable_backbone_layers=None, **kwargs):
-    trainable_backbone_layers = _validate_trainable_layers(
-        pretrained or pretrained_backbone, trainable_backbone_layers, 5, 3)
-
-    if pretrained:
-        # no need to download the backbone if pretrained is set
-        pretrained_backbone = False
-    backbone = resnet_fpn_backbone('resnet18', pretrained_backbone, trainable_layers=trainable_backbone_layers)
+def fasterrcnn_resnet_fpn(backbone_arch, pretrained=True, num_classes=91, trainable_backbone_layers=None, progress=True, **kwargs):
+    trainable_backbone_layers = _validate_trainable_layers(pretrained, trainable_backbone_layers, 5, 3)
+    backbone = resnet_fpn_backbone('resnet18', pretrained, trainable_layers=trainable_backbone_layers)
     model = FmFasterRCNN(backbone, num_classes, **kwargs)
     if pretrained:
-        state_dict = load_state_dict_from_url(model_urls['fasterrcnn_resnet18_fpn_coco'],
-                                              progress=progress)
-        model.load_state_dict(state_dict)
-        overwrite_eps(model, 0.0)
+        key = None
+        for modkey in model_urls.keys():
+            if modkey.__contains__(backbone_arch):
+                key = modkey
+                break
+        if key is not None:
+            state_dict = load_state_dict_from_url(model_urls[key], progress=progress)
+            model.load_state_dict(state_dict)
+            overwrite_eps(model, 0.0)
+        else:
+            warnings.warn(f'No model pretrained on COCO could be found. An imagenet pretrained one was pulled.')
     return model
-
-def fasterrcnn_resnet_fpn(pretrained=True, num_classes=91, trainable_backbone_layers=None)
-
-
-"""
-def get_model(output_shape) :
-    model = models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
-    in_features = model.roi_heads.box_predictor.cls_score.in_features
-    model.roi_heads.box_predictor = models.detection.faster_rcnn.FastRCNNPredictor(in_features, output_shape)
-    
-    return model
-"""

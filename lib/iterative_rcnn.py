@@ -5,12 +5,17 @@ import torch.nn.functional as F
 from torch import nn
 from typing import Tuple, List, Dict, Optional, Union, Any
 from rcnn.generalized_rcnn import FmGeneralizedRCNN
-from rcnn.faster_rcnn import FmFasterRCNN
-from rcnn.keypoint_rcnn import FmKeypointRCNN
+from rcnn.faster_rcnn import FmFasterRCNN, fasterrcnn_resnet_fpn
+from rcnn.keypoint_rcnn import FmKeypointRCNN, keypointrcnn_resnet_fpn
 from feedback.iterative_net import BaseIterativeNet, AdditiveIterativeNet, EnergyAscentIterativeNet
 from selector import BoxSelector
 from ops.normalizer import normalize, inverse_normalize
 from torchvision.ops import box_area
+from utils import Oks, SignedError, FeedbackResnet
+
+# ['Nose', Leye', 'Reye', 'Lear', 'Rear', 'Lsho', 'Rsho', 'Lelb',
+#  'Relb', 'Lwri', 'Rwri', 'Lhip', 'Rhip', 'Lkne', 'Rkne', 'Lank', 'Rank']
+coco_weights = Tensor([.26, .25, .25, .35, .35, .79, .79, .72, .72, .62,.62, 1.07, 1.07, .87, .87, .89, .89])/10.0
 
 class IterativeGeneralizedRCNN(nn.Module):
     """
@@ -159,18 +164,12 @@ class IterativeGeneralizedRCNN(nn.Module):
         else:
             return detections
 
-from rcnn.faster_rcnn import fasterrcnn_resnet_fpn
-from rcnn.keypoint_rcnn import keypointrcnn_resnet_fpn
-from utils import Oks, SignedError, FeedbackResnet
-
-# ['Nose', Leye', 'Reye', 'Lear', 'Rear', 'Lsho', 'Rsho', 'Lelb',
-#  'Relb', 'Lwri', 'Rwri', 'Lhip', 'Rhip', 'Lkne', 'Rkne', 'Lank', 'Rank']
-coco_weights = Tensor([.26, .25, .25, .35, .35, .79, .79, .72, .72, .62,.62, 1.07, 1.07, .87, .87, .89, .89])/10.0
-
 def get_model(
     backbone_arch,
     num_classes=2, 
     rcnn_pretrained=True, 
+    train_box_head=True,
+    train_kp_head=True,
     trainable_backbone_layers=None,
     keypoint_rcnn=False,
     keep_labels=[1],
@@ -189,7 +188,9 @@ def get_model(
             'resnet101', 'resnet152', 'resnext50_32x4d', 'resnext101_32x8d', 'wide_resnet50_2', 'wide_resnet101_2'
         num_classes (int): number of classes
         rcnn_pretrained (bool): if true try to find pretrained rcnn for the architecture. If not found, a warning
-            is printed
+            is printed and only the backbone is pretrained on Imagenet.
+        train_box_head (bool): if true the box head is trained, otherwise, it is frozen
+        train_kp_head (bool): if true the keypoint head is trained, otherwise, it is frozen
         trainable_backbone_layers (int): number of backbone layer to let be trainable. If None, the backbone is
             frozen
         keypoint_rcnn (bool): if true, use FmKeypointRCNN
@@ -206,11 +207,20 @@ def get_model(
     assert dataset=='coco', f'Only COCO is supported.'
     # rcnn
     if keypoint_rcnn:
-        rcnn = keypointrcnn_resnet_fpn(pretrained, num_classes, trainable_backbone_layers)
+        rcnn = keypointrcnn_resnet_fpn(backbone_arch, pretrained, num_classes, trainable_backbone_layers)
     else:
-        rcnn = faseterrcnn_resnet_fpn(pretrained, num_classes, trainable_backbone_layers)
+        rcnn = faseterrcnn_resnet_fpn(backbone_arch, pretrained, num_classes, trainable_backbone_layers)
     if trainable_backbone_layers == None:
         for param in rcnn.backbone.parameters(): param.requires_grad_(False)
+    if not train_box_head:
+        for param in rcnn.roi_heads.box_predictor.parameters(): param.requires_grad_(False)
+    else: # replace pretrained (91 classes) heads by new one
+        rcnn.roi_head.box_predictor = FastRCNNPredictor(model.roi_heads.box_predictor.cls_score.in_features, num_classes)
+    if keypoint_rcnn:
+        if not train_kp_head:
+            for param in rcnn.roi_heads.keypoint_predictor.parameters(): param.requires_grad_(False)
+        else:
+            pass # there is already the right number of keypoints in the pretrained models, no need to replace the head
     # selector
     selector = BoxSelector(keep_labels, iou_thresh)
     # iter_net

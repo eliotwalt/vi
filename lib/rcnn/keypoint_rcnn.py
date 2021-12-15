@@ -6,8 +6,11 @@ from torchvision.ops import MultiScaleRoIAlign
 from torchvision.ops import misc as misc_nn_ops
 from torchvision.models.resnet import *
 from torchvision.models.detection._utils import overwrite_eps
-from torchvision.models.detection.keypoint_rcnn import KeypointRCNNHeads, KeypointRCNNPredictor
+from torchvision.models.detection.keypoint_rcnn import KeypointRCNNHeads, KeypointRCNNPredictor, model_urls
+from torchvision._internally_replaced_utils import load_state_dict_from_url
+from torchvision.models.detection.backbone_utils import resnet_fpn_backbone, _validate_trainable_layers
 from typing import Tuple, List, Dict, Optional, Union
+import warnings
 from .roi_heads import FmRoIHeads
 from .faster_rcnn import FmFasterRCNN
 
@@ -154,31 +157,20 @@ class FmKeypointRCNN(FmFasterRCNN):
         return super().forward(images, targets)
 
 
-model_urls = {
-    # legacy model for BC reasons, see https://github.com/pytorch/vision/issues/1606
-    "keypointrcnn_resnet50_fpn_coco_legacy": "https://download.pytorch.org/models/keypointrcnn_resnet50_fpn_coco-9f466800.pth",
-    "keypointrcnn_resnet50_fpn_coco": "https://download.pytorch.org/models/keypointrcnn_resnet50_fpn_coco-fc266e95.pth",
-}
-
-from torchvision.models.detection.backbone_utils import resnet_fpn_backbone, _validate_trainable_layers
-
-def keypointrcnn_resnet50_fpn(pretrained=False, progress=True,
-                              num_classes=2, num_keypoints=17,
-                              pretrained_backbone=True, trainable_backbone_layers=None, **kwargs):
-    trainable_backbone_layers = _validate_trainable_layers(
-        pretrained or pretrained_backbone, trainable_backbone_layers, 5, 3)
-
+def keypointrcnn_resnet_fpn(backbone_arch, pretrained=True, num_classes=91, trainable_backbone_layers=None, progress=True, **kwargs):
+    trainable_backbone_layers = _validate_trainable_layers(pretrained, trainable_backbone_layers, 5, 3)
+    backbone = resnet_fpn_backbone('resnet18', pretrained, trainable_layers=trainable_backbone_layers)
+    model = FmKeypointRCNN(backbone, num_classes, **kwargs)
     if pretrained:
-        # no need to download the backbone if pretrained is set
-        pretrained_backbone = False
-    backbone = resnet_fpn_backbone('resnet50', pretrained_backbone, trainable_layers=trainable_backbone_layers)
-    model = FmKeypointRCNN(backbone, num_classes, num_keypoints=num_keypoints, **kwargs)
-    if pretrained:
-        key = 'keypointrcnn_resnet50_fpn_coco'
-        if pretrained == 'legacy':
-            key += '_legacy'
-        state_dict = load_state_dict_from_url(model_urls[key],
-                                              progress=progress)
-        model.load_state_dict(state_dict)
-        overwrite_eps(model, 0.0)
+        key = None
+        for modkey in model_urls.keys():
+            if modkey.__contains__(backbone_arch):
+                key = modkey
+                break
+        if key is not None:
+            state_dict = load_state_dict_from_url(model_urls[key], progress=progress)
+            model.load_state_dict(state_dict)
+            overwrite_eps(model, 0.0)
+        else:
+            warnings.warn(f'No backbone pretrained on COCO could be found. An imagenet pretrained one was pulled.')
     return model
