@@ -57,18 +57,15 @@ keypoint_features_flat = self.keypoint_head(images_features)
   - [x] Rename
 - [x] **lib.feedback.iterative_net.EnergyAscentIterativeNet**
   - [x] Rename
-- [ ] **lib.iterative_rcnn.IterativeRCNN**
-- [ ] **lib.iterative_rcnn.IterativeKeypointRCNN**
+- [x] **lib.iterative_rcnn.IterativeRCNN**
+- [x] **lib.iterative_rcnn.IterativeKeypointRCNN**
   - [ ] quick builders (rcnn part <a href='https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html'>this link</a>)
-- [ ] **lib.iterative_rcnn.IterativeFasterRCNN**
+- [x] **lib.iterative_rcnn.IterativeFasterRCNN**
   - [ ] quick builders (rcnn part <a href='https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html'>this link</a>)
 - [x] **lib.feedback.feedback_utils.pose_interpolation(current_pose(req grad!), target_pose, it)**
 - [x] **lib.utils.oks(input(req grad!), target)**
   - [x] add "normalize" kwarg to CONSTRUCTOR because in iter_net already normalized !!
   - [ ] not sure how to deal with visibility. Ignored for the moment ...
-- [ ] **lib.utils.kp_loss**
-  - [ ] WHAT IS IT ???????????
-  - [ ] losses, how exactly do we decide this output is this detection ? i.e how do we ensure that the order of the detections in detections\[i\]\['keypoints'\] is the same as in targets\[i\]\['keypoints'\] ????
 - [ ] **lib.utils.ap50**
   - [ ] the metric they use in the papers ?
   - [ ] pycocotools ?
