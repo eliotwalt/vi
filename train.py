@@ -5,14 +5,25 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import CocoDetection
 from torch.optim import Adam
 from lib.iterative_rcnn import get_iterative_rcnn
-from utils import get_train_args, get_train_transform, get_test_transform
+from utils import get_train_args, get_transform, get_target_transform, save_model
+from engine import train_model, validate_model
 
-def print_losses(val_loss, train_loss, epoch, num_epochs):
-    print('this would be the loss print')
+def collate_identity(x): return x
+
+def print_losses(val_loss, train_loss, epoch, num_epochs, iteration, num_iterations):
+    print('*'*20)
+    print('Iteration: {0}/{1}, Epoch {2}/{3}'.format(iteration+1, num_iterations, epoch+1, num_epochs))
+    print('|---Training losses:')
+    for k, l in train_loss.items():
+        print('    |--- {0}: {1:.4f}'.format(k, l))
+    print('Validation losses:')
+    for k, l in train_loss.items():
+        print('    |--- {0}: {1:.4f}'.format(k, l))
 
 def main():
     # Arguments and configuration
     args = get_train_args()
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     # Build model
     model = get_iterative_rcnn(args.backbone_arch, args.keypoint_rcnn, args.feedback, args.num_classes,
@@ -30,42 +41,42 @@ def main():
                                   annFile=args.val_annots, 
                                   transform=get_transform(),
                                   target_transform=get_target_transform())
-    train_dataloader = DataLoader(train_dataset, num_workers=4, shuffle=True, batch_size=args.batch_size).to(device)
-    val_dataloader = DataLoader(val_dataset, num_workers=4, shuffle=True, batch_size=args.batch_size).to(device)
+    train_dataloader = DataLoader(train_dataset, num_workers=4, shuffle=True, 
+                                  batch_size=args.batch_size, 
+                                  collate_fn=collate_identity)
+    val_dataloader = DataLoader(val_dataset, num_workers=4, shuffle=True, 
+                                batch_size=args.batch_size, 
+                                collate_fn=collate_identity)
+    train_dataloader.mean_pose = args.mean_pose
+    val_dataloader.mean_pose = args.mean_pose
 
     # Optimizer
-    optimizer = Adam(model.parameters(), lr=args.lr).to(device)
+    params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = Adam(params, lr=args.lr)
 
     # Incremental training: num_epochs at depth num_iterations
     model.train()
-    train_losses = []
-    val_losses = []
+    train_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
+    val_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
     for num_iterations in range(args.num_iterations+1):
+        best_val_loss_for_iteration = float('inf')
         for epoch in range(args.num_epochs):
             # training
-            for train_images, train_targets in train_dataloader:
-                detections, losses = model(train_images, train_targets, num_iterations) # init_pose ??????
-                optimizer.zero_grad()
-                if num_iterations == 0: [loss.backward() for (k, loss) in losses if k != 'feedbacks'] # iteration 0 -> train RCNN
-                else: loss['feebacks'][-1].backward() # iteration >= 1 -> train last feedback iteration
-                optimizer.step()
-                for k, loss in losses.items(): # add all losses to losses list
-                    if not loss_key == 'feedbacks':
-                        losses[k] = loss.detach().cpu()
-                    else:
-                        losses[k] = [l.detach().cpu() for l in loss]
-                train_losses.append(losses)
+            tr_losses = train_model(train_dataloader, model, device, num_iterations)
+            train_losses[str(num_iterations)].append(tr_losses)
             # validating
-            for val_images, val_targets in val_dataloader:
-                detections, losses = model(val_images, val_targets, num_iterations) # init_pose ??????
-                for k, loss in losses.items(): # add all losses to losses list
-                    if not loss_key == 'feedbacks':
-                        losses[k] = loss.detach().cpu()
-                    else:
-                        losses[k] = [l.detach().cpu() for l in loss]
-                val_losses.append(losses)
+            vl_losses = validate_model(val_dataloader, model, device, num_iterations)
+            val_losses[str(num_iterations)].append(vl_losses)
             # print
-            print_losses(train_losses[-1], val_losses[-1], epoch, args.num_epochs)
+            if epoch % args.print_frequency == 0:
+                print_losses(train_losses[str(num_iterations)][-1], 
+                            val_losses[str(num_iterations)][-1], 
+                            epoch, args.num_epochs, num_iterations,
+                            args.num_iterations)
+        # save model
+        best_val_loss_for_iteration = save_model(model, val_losses[str(num_iterations)], 
+                                                 os.path.join(args.model_dir, args.model_name),
+                                                 best_val_loss_for_iteration)
 
 if __name__ == '__main__':
     main()

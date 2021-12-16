@@ -27,6 +27,7 @@ def normalize(detections: List[Dict[str, Tensor]]):
     normalized_detections = detections
     for area, normalized_detection in normalized_detections:
         area = normalized_detection['area']
+        if len(area.shape) == 1: area = area.reshape(-1,1)
         for i in range(2):
             normalized_detection['keypoints'][:,:,i] = normalized_detection['keypoints'][:,:,i]/area
     return normalized_detections
@@ -54,6 +55,7 @@ def inverse_normalize(detections: List[Dict[str, Tensor]]):
     detections = normalized_detections
     for detection in detections:
         area = detection['area']
+        if len(area.shape) == 1: area = area.reshape(-1,1)
         for i in range(2):
             detection['keypoints'][:,:,i] = detection['keypoints'][:,:,i]*area
     return detections

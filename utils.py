@@ -1,9 +1,12 @@
 import argparse
+import torch
+from torch import Tensor
 from torch import nn
 import torchvision.transforms as T
+import os
 
 def get_transform():
-    return T.compose([T.ToTensor()])
+    return T.Compose([T.ToTensor()])
 
 def get_target_transform():
     return None
@@ -22,46 +25,69 @@ def get_train_args():
         required=True
     )
     p.add_argument(
-        '--train_imgs',
-        help="(required) path to dir containing train images",
-        required=True
-    )
-    p.add_argument(
-        '--train_annots',
-        help="(required) path to dir containing train annotations",
-        required=True
-    )
-    p.add_argument(
-        '--val_imgs',
-        help="(required) path to dir containing val images",
-        required=True
-    )
-    p.add_argument(
-        '--val_annots',
-        help="(required) path to dir containing val annotations",
-        required=True
-    )
-    p.add_argument(
         '--batch_size',
         help="(required) batch size",
-        required=True
+        required=True,
+        type=int
     )
     p.add_argument(
         '--lr',
         help='(required) learning rate',
-        required=True
+        required=True,
+        type=float,
     )
     p.add_argument(
         '--num_iterations',
         help='(required) number of feedback iteration maximum',
-        required=True 
+        required=True,
+        type=int,
     )
     p.add_argument(
         '--num_epochs',
         help='(required) number of training epochs',
+        required=True,
+        type=int,
+    )
+    p.add_argument(
+        '--model_dir',
+        help='(required) directory in which to save trained models',
         required=True
     )
+    p.add_argument(
+        '--model_name',
+        help='(required) name for saved trained models'
+    )
     # Optional
+    p.add_argument(
+        '--train_imgs',
+        help="path to dir containing train images",
+        required=False,
+        default='data/images/train2017/'
+    )
+    p.add_argument(
+        '--train_annots',
+        help="path to dir containing train annotations",
+        required=False,
+        default='data/annotations/person_keypoints_train2017.json'
+    )
+    p.add_argument(
+        '--val_imgs',
+        help="path to dir containing val images",
+        required=False,
+        default='data/images/val2017'
+    )
+    p.add_argument(
+        '--val_annots',
+        help="path to dir containing val annotations",
+        required=False,
+        default='data/annotations/person_keypoints_val2017.json'
+    )
+    p.add_argument(
+        '--mean_pose',
+        help='path to pickled tensor of mean pose',
+        required=False,
+        default='data/mean_poses/train2017.pt'
+    )
     p.add_argument(
         '--keypoint_rcnn',
         help='if specified, use FmKeypointRCNN, otherwise FmFasterRCNN',
@@ -79,6 +105,7 @@ def get_train_args():
         help='number of classes for rcnn',
         required=False,
         default=2,
+        type=int,
     )
     p.add_argument(
         '--train_box_head',
@@ -103,13 +130,15 @@ def get_train_args():
         help='list of labels to keep in selection process',
         required=False,
         nargs='+',
-        default=[1]
+        default=[1],
+        type=int,
     )
     p.add_argument(
         '--iou_thresh',
         help='iou threshold in selection process',
         required=False,
-        default=.3
+        default=.3,
+        type=float,
     )
     p.add_argument(
         '--feedback_loss_fn',
@@ -121,7 +150,8 @@ def get_train_args():
         '--feedback_rate',
         help=' step size of feedback updates',
         required=False,
-        default=.1
+        default=.1,
+        type=float,
     )
     p.add_argument(
         '--interpolate_poses',
@@ -134,9 +164,25 @@ def get_train_args():
         help='number of convolutional blocks in iter_net',
         required=False,
         default=1,
+        type=int,
     )
-
+    p.add_argument(
+        '--print_frequency',
+        help='print frequency (in number of epochs)',
+        required=False,
+        default=10,
+        type=int,
+    )
+    # parse argv
     args = p.parse_args()
+    # create directories
+    if not os.path.isdir(args.model_dir):
+        os.mkdir(args.model_dir)
+    if not os.path.isdir(os.path.join(args.model_dir, args.model_name)):
+        os.mkdir(os.path.join(args.model_dir, args.model_name))
+    # load mean pose
+    args.mean_pose = torch.load(args.mean_pose)
+    # feedback loss parsing
     if args.feedback_loss_fn == 'l2':
         args.feedback_loss_fn = nn.MSELoss(reduction='none')
     elif args.feedback_loss_fn == 'l1':
@@ -147,8 +193,12 @@ def get_train_args():
         raise AttributeError(f'invalid feedback_loss_fn, possible values are "l2", "l1" and "smooth_l1')
     return args
 
-args = get_train_args()
-print(args)
+def save_model(*args, **kwargs):
+    print('save model not implemented ...')
+
+if __name__ == '__main__':
+    args = get_train_args()
+    print(args)
 
 
     

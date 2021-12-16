@@ -143,6 +143,11 @@ class IterativeGeneralizedRCNN(nn.Module):
                 return detections
         # filtering to reduce batch size
         detections = self.selector(detections)
+        if len(detections)==0:
+            if self.training:
+                return detections, losses
+            else:
+                return detections
         # compute prediction areas
         detections = self.detection_area(detections)
         # normalize keypoints (only if is_keypoint_rcnn)
@@ -154,7 +159,7 @@ class IterativeGeneralizedRCNN(nn.Module):
         # iterative refinement
         if self.training:
             detections, feedback_losses = self.iter_net(detections, num_iterations, targets)
-            losses['feedback'] = feedback_losses
+            losses['feedback'] = {str(i): feedback_losses[i] for i in range(num_iterations)}
         else:
             detections = self.iter_net(detections, num_iterations)
         # inverse normalize
@@ -212,9 +217,9 @@ def get_iterative_rcnn(
     if trainable_backbone_layers == 0:
         trainable_backbone_layers = None
     if keypoint_rcnn:
-        rcnn = keypointrcnn_resnet_fpn(backbone_arch, pretrained, num_classes, trainable_backbone_layers)
+        rcnn = keypointrcnn_resnet_fpn(backbone_arch, rcnn_pretrained, num_classes, trainable_backbone_layers)
     else:
-        rcnn = faseterrcnn_resnet_fpn(backbone_arch, pretrained, num_classes, trainable_backbone_layers)
+        rcnn = fasterrcnn_resnet_fpn(backbone_arch, rcnn_pretrained, num_classes, trainable_backbone_layers)
     if trainable_backbone_layers == None:
         for param in rcnn.backbone.parameters(): param.requires_grad_(False)
     if not train_box_head:
@@ -236,8 +241,8 @@ def get_iterative_rcnn(
     out_channels = 1 if feedback == 'oks' else len(coco_weights)*2
     feedback_net = FeedbackResnet(out_channels=out_channels, features_dim=features_dim, num_blocks=num_conv_blocks_feedback)
     if feedback == 'oks':
-        iter_net = EnergyAscentIterativeNet(feedback_net, feedback_loss_fn, interpolate_poses, feedback_fn)
+        iter_net = EnergyAscentIterativeNet(feedback_net, feedback_rate, feedback_loss_fn, interpolate_poses, feedback_fn)
     else:
-        iter_net = AdditiveIterativeNet(feedback_net, feedback_loss_fn, interpolate_poses, feedback_fn)
+        iter_net = AdditiveIterativeNet(feedback_net, feedback_rate, feedback_loss_fn, interpolate_poses, feedback_fn)
     return IterativeGeneralizedRCNN(rcnn, selector, iter_net)
     

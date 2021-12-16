@@ -159,7 +159,7 @@ class FmKeypointRCNN(FmFasterRCNN):
 
 def keypointrcnn_resnet_fpn(backbone_arch, pretrained=True, num_classes=91, trainable_backbone_layers=None, progress=True, **kwargs):
     trainable_backbone_layers = _validate_trainable_layers(pretrained, trainable_backbone_layers, 5, 3)
-    backbone = resnet_fpn_backbone('resnet18', pretrained, trainable_layers=trainable_backbone_layers)
+    backbone = resnet_fpn_backbone(backbone_arch, pretrained, trainable_layers=trainable_backbone_layers)
     model = FmKeypointRCNN(backbone, num_classes, **kwargs)
     if pretrained:
         key = None
