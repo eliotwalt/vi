@@ -18,7 +18,7 @@ class Oks(nn.Module):
     """
     def __init__(self, weights: Tensor):
         super().__init__()
-        if len(self.weights.shape) < 2: weights = weights.unsqueeze(0)
+        if len(weights.shape) < 2: weights = weights.unsqueeze(0)
         self.weights = weights
     
     def forward(
@@ -45,7 +45,7 @@ class Oks(nn.Module):
         if len(areas.shape) < 2: areas = areas.unsqueeze(-1)
         dists = dists / (2*areas*self.weights**2)
         # filter visibilities
-        oks = torch.exp(-dists)*target_v
+        oks = torch.exp(-dists*target_v)
         oks = oks.mean(1)
         return oks
 
@@ -93,7 +93,7 @@ class FeedbackResnet(nn.Module):
     """
     def __init__(
         self, 
-        in_channels: Optional[int]=307,
+        in_channels: Optional[int]=306,
         out_channels: Optional[int]=1,
         stride: Optional[int]=1, 
         num_blocks: Optional[int]=2,

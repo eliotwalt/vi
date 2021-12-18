@@ -18,9 +18,9 @@ class ObjectSelector(object):
         self.keep_labels = keep_labels
         self.iou_thresh = iou_thresh
     
-    def select(self, detections: List[Dict[str, Tensor]], features: Optional[List[Tensor]]=None):
+    def __call__(self, detections: List[Dict[str, Tensor]], features: Optional[List[Tensor]]=None):
         """
-        ObjectSelector.select: apply selection
+        ObjectSelector.__call__: apply selection
 
         Args:
             detections (List[Dict[str, Tensor]]): List of M dictionaries containing detections 
@@ -47,6 +47,7 @@ class ObjectSelector(object):
             idx_keep = nms(detections[i]['boxes'], detections[i]['scores'], self.iou_thresh)
             mask_keep = torch.full((detections[i]['labels'].shape[0],), False)
             mask_keep[idx_keep] = True
+            mask_keep = mask_keep.to(detections[i]['labels'].device)
             for label in self.keep_labels:
                 mask_keep = torch.bitwise_and(mask_keep, detections[i]['labels']==label)
             for key in slct_detections[i].keys():

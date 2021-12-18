@@ -25,7 +25,7 @@ def normalize(detections: List[Dict[str, Tensor]]):
                 - others
     """
     normalized_detections = detections
-    for area, normalized_detection in normalized_detections:
+    for normalized_detection in normalized_detections:
         area = normalized_detection['area']
         if len(area.shape) == 1: area = area.reshape(-1,1)
         for i in range(2):

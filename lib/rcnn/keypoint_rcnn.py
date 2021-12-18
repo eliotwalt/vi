@@ -156,21 +156,11 @@ class FmKeypointRCNN(FmFasterRCNN):
         """
         return super().forward(images, targets)
 
-
-def keypointrcnn_resnet_fpn(backbone_arch, pretrained=True, num_classes=91, trainable_backbone_layers=None, progress=True, **kwargs):
-    trainable_backbone_layers = _validate_trainable_layers(pretrained, trainable_backbone_layers, 5, 3)
-    backbone = resnet_fpn_backbone(backbone_arch, pretrained, trainable_layers=trainable_backbone_layers)
-    model = FmKeypointRCNN(backbone, num_classes, **kwargs)
-    if pretrained:
-        key = None
-        for modkey in model_urls.keys():
-            if modkey.__contains__(backbone_arch):
-                key = modkey
-                break
-        if key is not None:
-            state_dict = load_state_dict_from_url(model_urls[key], progress=progress)
-            model.load_state_dict(state_dict)
-            overwrite_eps(model, 0.0)
-        else:
-            warnings.warn(f'No backbone pretrained on COCO could be found. An imagenet pretrained one was pulled.')
+def keypointrcnn_resnet_fpn(backbone_arch):
+    backbone = resnet_fpn_backbone(backbone_arch, True, trainable_layers=5)
+    model = FmKeypointRCNN(backbone, 2)
+    if backbone_arch == 'resnet50':
+        state_dict = load_state_dict_from_url(model_urls["keypointrcnn_resnet50_fpn_coco_legacy"])
+        model.load_state_dict(state_dict)
+        overwrite_eps(0.0)
     return model

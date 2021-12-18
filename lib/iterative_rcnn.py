@@ -36,9 +36,9 @@ class IterativeGeneralizedRCNN(nn.Module):
         self.rcnn = rcnn
         self.iter_net = iter_net
         self.selector = selector
-        if isinstance(rcnn, FmFasterRCNN):
+        if type(rcnn)==FmFasterRCNN:
             self.is_keypoint_rcnn = False
-        elif isinstance(rcnn, FmKeypointRCNN):
+        elif type(rcnn)==FmKeypointRCNN:
             self.is_keypoint_rcnn = True
         else:
             raise AttributeError(f'rcnn must be Union[FmFasterRCNN, FmKeypointRCNN]')
@@ -145,6 +145,7 @@ class IterativeGeneralizedRCNN(nn.Module):
         detections = self.selector(detections)
         if len(detections)==0:
             if self.training:
+                losses['feedback'] = {str(i): None for i in range(num_iterations)}
                 return detections, losses
             else:
                 return detections
@@ -169,80 +170,37 @@ class IterativeGeneralizedRCNN(nn.Module):
         else:
             return detections
 
-def get_iterative_rcnn(
-    backbone_arch,
-    keypoint_rcnn,
-    feedback,
-    num_classes=2, 
-    rcnn_pretrained=True, 
-    train_box_head=True,
-    train_kp_head=True,
-    trainable_backbone_layers=0,    
-    keep_labels=[1],
-    iou_thresh=.3,
-    feedback_loss_fn=nn.SmoothL1Loss(reduction='none'),
-    feedback_rate=.1,
-    interpolate_poses=True,
-    num_conv_blocks_feedback=1,
-    features_dim=7,
-    dataset='coco'
+def get_iter_kprcnn_resnet18_oks(
+    keep_labels, 
+    iou_thresh, 
+    feedback_rate, 
+    feedback_loss_fn,
+    interpolate_poses,
+    num_conv_blocks_feedback,
+    features_dim=7
 ):
-    """
-    Args:
-        backbone_arch (str): resnet architecture. Possible values are 'ResNet', 'resnet18', 'resnet34', 'resnet50',
-            'resnet101', 'resnet152', 'resnext50_32x4d', 'resnext101_32x8d', 'wide_resnet50_2', 'wide_resnet101_2'
-        keypoint_rcnn (bool): if true, use FmKeypointRCNN
-        feedback (str): feedback signal. Possible values are 'oks', 'ief'
-        num_classes (int): number of classes
-        rcnn_pretrained (bool): if true try to find pretrained rcnn for the architecture. If not found, a warning
-            is printed and only the backbone is pretrained on Imagenet.
-        train_box_head (bool): if true the box head is trained, otherwise, it is frozen
-        train_kp_head (bool): if true the keypoint head is trained, otherwise, it is frozen
-        trainable_backbone_layers (int): number of backbone layer to let be trainable. If 0, the backbone is
-            frozen
-        keep_labels (List[int]): list of labels to keep in selection process
-        iou_thresh (float): iou threshold in selection process
-        feedback_loss_fn (nn.Module or F.function): loss function for feedback prediction
-        feedback_rate (float): step size of feedback updates
-        interpolate_poses (bool): if true, intermediary poses are interpolated
-        num_conv_blocks_feedback (int): number of convolutional blocks in iter_net
-        features_dim (int): dimension of feature maps
-        dataset (str): dataset name
-    
-    returns:
-        IterativeGeneralizedRCNN instance
-    """
-    assert dataset=='coco', f'Only COCO is supported.'
-    # rcnn
-    if trainable_backbone_layers == 0:
-        trainable_backbone_layers = None
-    if keypoint_rcnn:
-        rcnn = keypointrcnn_resnet_fpn(backbone_arch, rcnn_pretrained, num_classes, trainable_backbone_layers)
-    else:
-        rcnn = fasterrcnn_resnet_fpn(backbone_arch, rcnn_pretrained, num_classes, trainable_backbone_layers)
-    if trainable_backbone_layers == None:
-        for param in rcnn.backbone.parameters(): param.requires_grad_(False)
-    if not train_box_head:
-        for param in rcnn.roi_heads.box_predictor.parameters(): param.requires_grad_(False)
-    else: # replace pretrained (91 classes) heads by new one
-        rcnn.roi_head.box_predictor = FastRCNNPredictor(model.roi_heads.box_predictor.cls_score.in_features, num_classes)
-    if keypoint_rcnn:
-        if not train_kp_head:
-            for param in rcnn.roi_heads.keypoint_predictor.parameters(): param.requires_grad_(False)
-        else:
-            pass # there is already the right number of keypoints in the pretrained models, no need to replace the head
-    # selector
+    rcnn = keypointrcnn_resnet_fpn('resnet18')
     selector = ObjectSelector(keep_labels, iou_thresh)
-    # iter_net
-    if feedback == 'oks':
-        feedback_fn = Oks(coco_weights)
-    elif feedback == 'ief':
-        feedback_fn = KeypointSignedError()
-    out_channels = 1 if feedback == 'oks' else len(coco_weights)*2
-    feedback_net = FeedbackResnet(out_channels=out_channels, features_dim=features_dim, num_blocks=num_conv_blocks_feedback)
-    if feedback == 'oks':
-        iter_net = EnergyAscentIterativeNet(feedback_net, feedback_rate, feedback_loss_fn, interpolate_poses, feedback_fn)
-    else:
-        iter_net = AdditiveIterativeNet(feedback_net, feedback_rate, feedback_loss_fn, interpolate_poses, feedback_fn)
-    return IterativeGeneralizedRCNN(rcnn, selector, iter_net)
-    
+    feedback_fn = Oks(coco_weights)
+    feedback_net = FeedbackResnet(out_channels=1, features_dim=features_dim, num_blocks=num_conv_blocks_feedback)
+    iter_net = EnergyAscentIterativeNet(feedback_net, feedback_rate, feedback_loss_fn, interpolate_poses, feedback_fn)
+    return IterativeGeneralizedRCNN(rcnn, iter_net, selector)
+
+def get_iter_kprcnn_resnet18_ief(
+    keep_labels, 
+    iou_thresh, 
+    feedback_rate, 
+    feedback_loss_fn,
+    interpolate_poses,
+    num_conv_blocks_feedback,
+    features_dim=7
+):
+    rcnn = keypointrcnn_resnet_fpn('resnet18')
+    selector = ObjectSelector(keep_labels, iou_thresh)
+    feedback_fn = KeypointSignedError()
+    feedback_net = FeedbackResnet(out_channels=len(coco_weights)*3, features_dim=features_dim, num_blocks=num_conv_blocks_feedback)
+    iter_net = AdditiveIterativeNet(feedback_net, feedback_rate, feedback_loss_fn, interpolate_poses, feedback_fn)
+    return IterativeGeneralizedRCNN(rcnn, iter_net, selector)
+
+def get_kprcnn_resnet50():
+    return keypointrcnn_resnet_fpn('resnet50')

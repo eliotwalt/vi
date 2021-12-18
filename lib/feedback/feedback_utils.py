@@ -23,6 +23,8 @@ def pose_interpolation(init_poses: Tensor, target_poses: Tensor, num_iterations:
     intermediary_poses = []
     for it in range(1, num_iterations+1):
         w = it/(num_iterations+1)
+        print(init_poses.shape, init_poses[:,:,0:2].shape)
+        print(target_poses.shape, target_poses[:,:,0:2].shape)
         tmp = torch.lerp(input=init_poses[:,:,0:2], end=target_poses[:,:,0:2], weight=w)
         intermediary_poses.append(
             torch.cat([tmp, visibilities], dim=-1)
