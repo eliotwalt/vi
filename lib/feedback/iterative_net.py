@@ -4,8 +4,7 @@ from torch import Tensor
 import torch.nn.functional as F
 from torch import nn
 from typing import Tuple, List, Dict, Optional, Union, Any
-from torchvision.ops import box_iou
-from .feedback_utils import pose_interpolation
+from .feedback_utils import pose_interpolation, compute_ious
 
 class BaseIterativeNet(nn.Module):
     """
@@ -69,6 +68,7 @@ class BaseIterativeNet(nn.Module):
         batch_size, K, _ = poses.shape
         features_poses = []
         visibilities = []
+        print('theerror input poses', poses.__class__, len(poses))
         for keypoint in poses:
             x, y, v = keypoint[:,0], keypoint[:,1], keypoint[:,2]
             features = []
@@ -78,6 +78,7 @@ class BaseIterativeNet(nn.Module):
                 features.append(torch.full((1,1,features_dim,features_dim), v_val.item()))
             features = torch.cat(features, dim=1)
             features_poses.append(features)
+        print('theerror before cat', features_poses.__class__, len(features_poses))
         features_poses = torch.cat(features_poses, dim=0)
         return features_poses
 
@@ -86,36 +87,49 @@ class BaseIterativeNet(nn.Module):
 
     def compute_loss(
         self, 
-        feedback: List[Tensor], 
-        target_feedback: List[Tensor],
-        poses: List[Tensor],
+        pred_poses: List[Tensor],
         target_poses: List[Tensor],
-        ious: List[Tensor]
+        pred_feedbacks: List[Tensor],
+        ious: List[Tensor],
+        target_areas: Optional[List[Tensor]],
+        intermediary_poses: Optional[List[List[Tensor]]]=None 
     ):
         """
         BaseIterativeNet.compute_loss: compute iou-weighted feedback loss
 
         Args:
-            feedback (List[Tensor[L]]): list of predicted feedbacks (requires grad !)
-            target_feedback (List[Tensor[L']]): list of target feedbacks
-            poses (List[Tensor[L, K, 3]]): list of predicted poses (requires grad !)
+            pred_poses (List[Tensor[L, K, 3]]): list of predicted poses (requires grad !)
             target_poses (List[Tensor[L', K, 3]]): list of target poses
+            pred_feedbacks (List[Tensor[L]]): list of predicted feedbacks (requires grad !)
             ious (List[Tensor[L, L']]): pairwise ious between predictions and targets
+            target_areas (List[Tensor[L']]): list of target boxes areas
+            (optional) intermediary_poses (List[Tensor[L,L',K,3]]): interpolated poses if necessary
 
         Returns:
-            loss (Tensor[1]): average feedback loss
+            loss (Tensor[]): average feedback loss
         """
-        for i, (pred_feedback, pred_pose) in enumerate(zip(feedback, poses)):
-            pred_visibility = pred_pose[:,:,2]
-            for j, (true_feedback, true_pose) in enumerate(zip(target_feedback, target_poses)):
-                true_visibility = true_pose[:,:,2]
-                print(pred_visibility.shape)
-                print(true_visibility.shape)
-                print(pred_feedback.shape)
-                print(true_feedback.shape)
-                loss = ious[i][j].detach() * (self.feedback_loss_fn(pred_feedback, true_feedback) + F.binary_cross_entropy(pred_visibility, true_visibility))
-                losses.append(loss)
-        loss = losses.mean()
+        loss = 0
+        for nimg in range(len(pred_poses)): # loop on input images
+            device = pred_poses[nimg].device
+            if intermediary_poses is not None:
+                intermediary_poses[nimg] = intermediary_poses[nimg].to(device)
+            target_poses[nimg] = target_poses[nimg].to(device)
+            target_areas[nimg] = target_areas[nimg].to(device)
+            ious[nimg] = ious[nimg].to(device)
+            for i in range(pred_poses[nimg].shape[0]): # loop on predictions
+                for j in range(target_poses[nimg].shape[0]): # loop on targets
+                    pred_pose = pred_poses[nimg][i] # (17, 3)
+                    targ_pose = target_poses[nimg][j] # (17, 3)
+                    pred_feedback = pred_feedbacks[nimg][i] # (feedback_shape)
+                    if intermediary_poses is not None:
+                        interm_pose = intermediary_poses[nimg][i][j]
+                        targ_feedback = self.feedback_fn(interm_pose, targ_pose, target_areas[nimg][j])
+                    else:
+                        targ_feedback = self.default_feedback * torch.ones_like(pred_feedback).detach()
+                    loss_ij = self.feedback_loss_fn(pred_feedback, targ_feedback)
+                    loss_ij += F.binary_cross_entropy(pred_pose[:,2], targ_pose[:,2])
+                    loss_ij *= ious[nimg][i][j]
+                    loss += loss_ij
         return loss
 
     def forward(
@@ -154,49 +168,58 @@ class BaseIterativeNet(nn.Module):
                     - others
             (optional) losses (List[Tensor[1]]): List of `num_iterations` averaged over batch losses
         """
+        M = len(detections)
         # parse and initialize
         features = [d['features'] for d in detections] # List[Tensor[L,256,D,D]]
-        poses = [[d['keypoints'] for d in detections]] # List[List[Tensor[L,K,3]]]
-        feedbacks = [] # List[List[Tensor[1]]]
+        poses = [[detections[i]['keypoints']] for i in range(M)]
+        feedbacks = [[] for i in range(M)]
         if self.training:
             target_poses = [t['keypoints'] for t in targets] # List[Tensor[L',K,3]]
             target_areas = [t['area'] for t in targets] # List[Tensor[1]]
             losses = [] # List[Tensor[1]]
             boxes = [d['boxes'] for d in detections] # List[Tensor[L, 4]]
-            target_boxes = [t['boxes'] for t in detections] # List[Tensor[L', 4]]
-            ious = []
-            for pred_boxes in boxes:
-                for targ_boxes in target_boxes:
-                    ious.append(box_iou(pred_boxes, targ_boxes)) # List[Tensor[L, L']]
+            target_boxes = [t['boxes'] for t in targets] # List[Tensor[L', 4]]
+            ious = compute_ious(boxes, target_boxes)
         # make batches
         features_batch, idx_list = self.batch_from_list(features) # Tensor[L*M, 256, D, D]
-        poses_batch, _ = self.batch_from_list(poses[0]) # Tensor[L*M, K, 3]
+        poses_batch, _ = self.batch_from_list([d['keypoints'] for d in detections]) # Tensor[L*M, K, 3]
         if self.training:
             target_poses_batch, target_idx_list = self.batch_from_list(target_poses) # Tensor[L'*M, K, 3]
         # create intermediary poses if necessary
         if self.training and self.interpolate_poses:
-            intermediary_poses = pose_interpolation(poses_batch, target_poses_batch, num_iterations)
+            intermediary_poses = pose_interpolation([d['keypoints'] for d in detections], target_poses, num_iterations) # List[List[Tensor[L, L', K, 3]]]
         # iterative refinement
         for iteration in range(num_iterations):
             poses_batch, feedback_batch = self.forward_iteration(features_batch, poses_batch)
             feedback_batch.squeeze(-1) # Tensor[L*M, 1] -> Tensor[L*M]
-            poses.append(poses_batch.split(idx_list, 0)) # Tensor[L*M, 256, D, D] -> List[Tensor[L, 256, D, D]]
-            feedbacks.append(feedback_batch.split(idx_list, 0)) # Tensor[L*M, K, 3] -> List[Tensor[L, K, 3]]
+            poses_list = list(poses_batch.split(idx_list, 0))
+            feedbacks_list = list(feedback_batch.split(idx_list, 0))
+            for i in range(M):
+                poses[i].append(poses_list[i])
+                feedbacks[i].append(feedbacks_list[i])
+            # poses[iteration+1] = list(poses_batch.split(idx_list, 0)) # Tensor[L*M, 256, D, D] -> List[Tensor[L, 256, D, D]]
+            # feedbacks[iteration] = list(feedback_batch.split(idx_list, 0)) # Tensor[L*M, K, 3] -> List[Tensor[L, K, 3]]
             if self.training:
-                # compute target feedback
+                loss_kwargs = {'pred_poses': poses_list, 'target_poses': target_poses, 
+                               'pred_feedbacks': feedbacks_list, 'ious': ious,
+                               'target_areas': target_areas}
                 if self.interpolate_poses:
-                    target_feedback_batch = self.feeback_fn(intermediary_poses[iteration], target_poses_batch, target_areas).detach()
-                    intermediary_poses = intermediary_poses[iteration].split(target_idx_list, 0)
-                else:
-                    target_feedback_batch = self.default_feedback*torch.ones_like(target_poses_batch).detach()
-                    intermediary_poses = target_poses_batch.split(target_idx_list, 0)
-                target_feedback = target_feedback_batch.split(target_idx_list, 0)
-                loss = self.compute_loss(feedbacks[-1], target_feedback, poses[-1], intermediary_poses, ious)
+                    loss_kwargs['intermediary_poses'] = intermediary_poses[iteration]
+                loss = self.compute_loss(**loss_kwargs)
+                # # compute target feedback
+                # if self.interpolate_poses:
+                #     target_feedback_batch = self.feeback_fn(intermediary_poses[iteration], target_poses_batch, target_areas).detach()
+                #     intermediary_poses = intermediary_poses[iteration].split(target_idx_list, 0)
+                # else:
+                #     target_feedback_batch = self.default_feedback*torch.ones_like(target_poses_batch).detach()
+                #     intermediary_poses = target_poses_batch.split(target_idx_list, 0)
+                # target_feedback = target_feedback_batch.split(target_idx_list, 0)
+                # loss = self.compute_loss(feedbacks[-1], target_feedback, poses[-1], intermediary_poses, ious)
                 losses.append(loss)
         # complete detections
-        for detection in detections:
-            detection['keypoints'] = poses
-            detection['feedbacks'] = feedbacks
+        for i in range(M):
+            detections[i]['keypoints'] = poses[i]
+            detections[i]['feedbacks'] = feedbacks[i]
         # return
         if self.training:
             return detections, losses

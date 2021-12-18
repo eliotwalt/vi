@@ -18,35 +18,38 @@ class Oks(nn.Module):
     """
     def __init__(self, weights: Tensor):
         super().__init__()
-        if len(weights.shape) < 2: weights = weights.unsqueeze(0)
         self.weights = weights
     
     def forward(
         self, 
-        input_poses: Tensor, 
-        target_poses: Tensor, 
+        input_pose: Tensor, 
+        target_pose: Tensor, 
         areas: Optional[Tensor]=None
     ):
         """
         Oks.forward: forward pass
         
         Args:
-            input_poses (Tensor[N, K, 3]): input poses
-            target_poses (Tensor[N, K, 3]): target poses
-            areas (Tensor[N]): areas to normalize with, required if
-                self.normalize=True
+            input_pose (Tensor[K, 3]): input pose
+            target_pose (Tensor[K, 3]): target pose
+            areas (float): area of the target
         
         Returns:
             oks (Tensor[N]): oks values for each pose
+        
+        ref: https://cocodataset.org/#keypoints-eval
         """
-        target_v = target_poses[:,:,2]
-        dists = (input_poses[:,:,0:2] - target_poses[:,:,0:2])**2        
-        dists = dists.sum(dim=-1)
-        if len(areas.shape) < 2: areas = areas.unsqueeze(-1)
-        dists = dists / (2*areas*self.weights**2)
+        target_v = target_pose[:,2] # binary !!!
+        print('inp', input_pose.device, 'targ', target_pose.device)
+        dists = (input_pose[:,0:2] - target_pose[:,0:2])**2 # (17,2)
+        print('dists before sum', dists.shape)
+        dists = dists.sum(dim=-1) # (17)
+        if dists.device != self.weights.device:
+            self.weights = self.weights.to(dists.device)
+        dists = dists / (2*areas*self.weights**2) # (17)
         # filter visibilities
-        oks = torch.exp(-dists*target_v)
-        oks = oks.mean(1)
+        oks = torch.exp(-dists)*target_v
+        oks = oks.sum()/target_v.sum()
         return oks
 
 class KeypointSignedError(nn.Module):
@@ -66,16 +69,18 @@ class KeypointSignedError(nn.Module):
         Oks.forward: forward pass
         
         Args:
-            input_tensor (Tensor[N, K, 3]): input_tensor
-            target_tensor (Tensor[N, K, 3]): target_tensor
+            input_tensor (Tensor[K, 3]): input_tensor
+            target_tensor (Tensor[K, 3]): target_tensor
             *args, **kwargs (Any): for compatibility
         
         Returns:
             signed_error (Tensor[N, *]): signed_error values for each position
         """
-        target_v = target_poses[:,:,2]
+        target_v = target_poses[:,2]
         signed_error = target_tensor - input_tensor
-        signed_error *= target_v
+        signed_error /= areas
+        signed_error *= target_v # binary !
+        signed_error = signed_error.sum() / target_v.sum()    
         return signed_error
 
 class FeedbackResnet(nn.Module):

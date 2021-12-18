@@ -75,6 +75,7 @@ class ConvertCocoPolysToMask:
             num_keypoints = keypoints.shape[0]
             if num_keypoints:
                 keypoints = keypoints.view(num_keypoints, -1, 3)
+                keypoints[:,:,2] = (keypoints[:,:,2]>0).to(int)
 
         keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
         boxes = boxes[keep]

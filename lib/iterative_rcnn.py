@@ -108,7 +108,7 @@ class IterativeGeneralizedRCNN(nn.Module):
                         evaluation
         
         Returns:
-            detections (List[Dict[str, Tensor]]): List of M dictionaries containing detections 
+            detections (List[List[Dict[str, Tensor]]]): list of num_iterations+1 lists of M dictionaries containing detections 
                 attributes:
                     - boxes (Tensor[N, 4]): coordinates of N bbox, formatted as [x0, y0, x1, y1]
                     - labels (Int64Tensor[N]): the predicted labels for each detection
@@ -142,7 +142,13 @@ class IterativeGeneralizedRCNN(nn.Module):
             else:
                 return detections
         # filtering to reduce batch size
-        detections = self.selector(detections)
+        # detections = self.selector(detections)
+        i = 0
+        print(detections[0])
+        while i < len(detections):
+            if detections[i]['boxes'].size(0) <= 1:
+                detections.pop(i)
+            else: i += 1
         if len(detections)==0:
             if self.training:
                 losses['feedback'] = {str(i): None for i in range(num_iterations)}
@@ -165,10 +171,26 @@ class IterativeGeneralizedRCNN(nn.Module):
             detections = self.iter_net(detections, num_iterations)
         # inverse normalize
         detections = inverse_normalize(detections)
+        # reshape
+        detections = self.reshape_detections(detections, num_iterations)
         if self.training:
             return detections, losses
         else:
             return detections
+
+    def reshape_detections(self, detections: List[Dict[str, List[Tensor]]], num_iterations: int) -> List[List[Dict[str, Tensor]]]:
+        M = len(detections)
+        N = num_iterations
+        reshaped_dets = [[{k: v for k,v in detections[i].items()} for i in range(M)] for _ in range(N)]
+        for i in range(M):
+            dets = detections[i]
+            for k, v in dets.items():
+                for j in range(N):
+                    reshaped_dets[j][i][k] = v[j]
+        return reshaped_dets
+            
+        
+        
 
 def get_iter_kprcnn_resnet18_oks(
     keep_labels, 

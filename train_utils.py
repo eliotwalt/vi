@@ -280,7 +280,7 @@ def get_train_args():
         '--iou_thresh',
         help='iou threshold in selection process',
         required=False,
-        default=.3,
+        default=.1,
         type=float,
     )
     p.add_argument(
@@ -327,11 +327,11 @@ def get_train_args():
     args.mean_pose = torch.load(args.mean_pose)
     # feedback loss parsing
     if args.feedback_loss_fn == 'l2':
-        args.feedback_loss_fn = nn.MSELoss(reduction='none')
+        args.feedback_loss_fn = nn.MSELoss(reduction='mean')
     elif args.feedback_loss_fn == 'l1':
-        args.feedback_loss_fn = nn.L1Loss(reduction='none')
+        args.feedback_loss_fn = nn.L1Loss(reduction='mean')
     elif args.feedback_loss_fn == 'smooth_l1':
-        args.feedback_loss_fn = nn.SmoothL1Loss(reduction='none')
+        args.feedback_loss_fn = nn.SmoothL1Loss(reduction='mean')
     else:
         raise AttributeError(f'invalid feedback_loss_fn, possible values are "l2", "l1" and "smooth_l1')
     return args

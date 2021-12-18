@@ -44,9 +44,9 @@ def train_model(train_dataloader, model, device, num_iterations, optimizer):
             loss = sum(loss for loss in losses.values())
             loss.backward()
         else: # iteration >= 1 -> train last feedback iteration (if present)
-            if loss['feedbacks'][-1] is not None: # could not be the case if the selector return list of None (some imgs have 0 keypoints for some reason)
+            if losses['feedback'][str(num_iterations-1)] is not None: # could not be the case if the selector return list of None (some imgs have 0 keypoints for some reason)
                 step = True
-                loss = loss['feebacks'][-1]
+                loss = losses['feedback'][str(num_iterations-1)]
                 loss.backward()
         if step:
             optimizer.step()

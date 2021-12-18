@@ -5,4 +5,5 @@ python train.py --model iter_kprcnn_resnet18_oks \
                 --num_epochs 5 \
                 --model_dir saved_models \
                 --model_name iter_kprcnn_resnet18_oks \
-                --print_frequency 1
+                --print_frequency 1 \
+                --interpolate_poses
