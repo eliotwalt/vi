@@ -57,13 +57,15 @@ if __name__ == '__main__':
     train_coco_df = pd.merge(images_df, persons_df, right_index=True, left_index=True)
 
     print('computing mean pose')
-    poses = torch.Tensor(train_coco_df.keypoints.tolist()).reshape(-1,17,3)
-    areas = torch.Tensor(train_coco_df.area.tolist()).reshape(-1,1)
-    for i in range(2):
-        poses[:,:,i] = poses[:,:,i]/areas
-    poses = poses.mean(0)
+    mean_pose = torch.Tensor(train_coco_df.keypoints.tolist()).reshape(-1,17,3).mean(0)
+    mean_area = torch.Tensor(train_coco_df.area.tolist()).mean().item()
+    mean_pose[:,0] /= mean_area
+    mean_pose[:,1] /= mean_area
+    mean_pose[:,2] = (mean_pose[:,2]>0).to(torch.float32)
+    print(mean_pose.shape)
+    print(mean_pose)
 
     print('saving')
-    torch.save(poses, 'data/mean_poses/train2017.pt')
+    torch.save(mean_pose, 'data/mean_poses/train2017.pt')
 
     print('Done')

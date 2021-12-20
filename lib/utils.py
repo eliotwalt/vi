@@ -61,23 +61,23 @@ class KeypointSignedError(nn.Module):
 
     def forward(
         self,
-        input_tensor: Tensor,
-        targets_poses: Tensor,
-        *args, **kwargs,
+        input_poses: Tensor,
+        target_poses: Tensor,
+        areas: Optional[Tensor]=None
     ):
         """
         Oks.forward: forward pass
         
         Args:
-            input_tensor (Tensor[K, 3]): input_tensor
-            target_tensor (Tensor[K, 3]): target_tensor
-            *args, **kwargs (Any): for compatibility
+            input_poses(Tensor[K, 3]): input_poses
+            target_poses (Tensor[K, 3]): target_poses
+            areas (float): area of the target
         
         Returns:
             signed_error (Tensor[N, *]): signed_error values for each position
         """
-        target_v = target_poses[:,2]
-        signed_error = (target_tensor - input_tensor)*target_v/(areas+EPS)
+        target_v = target_poses[:,2].unsqueeze(-1)
+        signed_error = (target_poses[:,0:2] - input_poses[:,0:2])*target_v/(areas+EPS)
         signed_error = signed_error.sum() / (target_v.sum()+EPS)
         return signed_error
 

@@ -71,7 +71,7 @@ def main():
     val_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
     mean_train_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
     mean_val_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
-    for num_iterations in range(0, args.num_iterations+1):
+    for num_iterations in range(1, args.num_iterations+1):
         best_val_loss_for_iteration = float('inf')
         epoch = 0
         while epoch < args.num_epochs:
@@ -81,7 +81,7 @@ def main():
                 print_header(epoch, args.num_epochs, num_iterations, args.num_iterations)
                 # training
                 # with torch.autograd.set_detect_anomaly(True):
-                tr_losses, tr_times = train_model(train_dataloader, model, device, num_iterations, optimizer)
+                tr_losses, tr_times, empty = train_model(train_dataloader, model, device, num_iterations, optimizer)
                 train_times[str(num_iterations)]['forward'].extend(tr_times['forward'])
                 train_times[str(num_iterations)]['backward'].extend(tr_times['backward'])
                 train_losses[str(num_iterations)].append(tr_losses)
@@ -104,10 +104,14 @@ def main():
                                                         best_val_loss_for_iteration, num_iterations)
                 # incr epoch
                 epoch += 1
+                if empty > .4:
+                    print('RCNN predicts nothing, going to next iteration')
+                    epoch = args.num_epochs+1
+                    break
             except RuntimeError: # Optimal batch size hard to predict. If it happens, take back at previous iteration
                 print('Catched CUDA error: Restarting training epoch with smaller batch size ...')
                 # create smaller data loaders
-                train_dataloader.batch_size -= 1
+                args.batch_size -= 1
                 train_dataloader = DataLoader(train_dataset, num_workers=4, shuffle=True, 
                                   batch_size=args.batch_size, 
                                   collate_fn=collate_fn)

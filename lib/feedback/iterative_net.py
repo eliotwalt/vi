@@ -123,14 +123,11 @@ class BaseIterativeNet(nn.Module):
                     pred_feedback = pred_feedbacks[nimg][i] # (feedback_shape)
                     if intermediary_poses is not None:
                         interm_pose = intermediary_poses[nimg][i][j]
-                        targ_feedback = self.feedback_fn(interm_pose, targ_pose, target_areas[nimg][j])
+                        targ_feedback = self.feedback_fn(pred_pose, interm_pose, target_areas[nimg][j])
                     else:
-                        targ_feedback = self.default_feedback * torch.ones_like(pred_feedback).detach()
+                        targ_feedback = self.feedback_fn(pred_pose, targ_pose, target_areas[nimg][j])
                     loss_ij = ious[nimg][i][j] * (self.feedback_loss_fn(pred_feedback, targ_feedback) + \
                                                   F.binary_cross_entropy(pred_pose[:,2], targ_pose[:,2]))
-                    # loss_ij += F.binary_cross_entropy(pred_pose[:,2], targ_pose[:,2])
-                    # loss_ij *= ious[nimg][i][j]
-                    # loss += loss_ij
                     loss.append(loss_ij)
         loss = sum(loss)
         return loss

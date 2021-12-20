@@ -7,4 +7,4 @@ python train.py --model iter_kprcnn_resnet18_oks \
                 --model_name iter_kprcnn_resnet18_oks \
                 --print_frequency 1 \
                 --interpolate_poses \
-                --feedback_loss_fn l2
+                --feedback_loss_fn smooth_l1

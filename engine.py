@@ -17,6 +17,7 @@ def nested_detach(losses):
 def train_model(train_dataloader, model, device, num_iterations, optimizer):
     tr_losses = []
     tr_times = {'forward': [], 'backward': []}
+    empties = 0
     print('Training ...')
     pbar = tqdm(train_dataloader)
     for train_images, train_targets in pbar:
@@ -57,7 +58,11 @@ def train_model(train_dataloader, model, device, num_iterations, optimizer):
         losses = nested_detach(losses)
         tr_losses.append(losses)        
         pbar.set_postfix(losses)
-    return tr_losses, tr_times
+        if num_iterations == 0:
+            for det in detections:
+                if len(det['boxes'] == 0):
+                    empties += 1
+    return tr_losses, tr_times, empties/len(train_dataloader)/train_dataloader.batch_size
 
 def validate_model(val_dataloader, model, device, num_iterations):
     val_losses = []

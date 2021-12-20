@@ -98,7 +98,7 @@ def get_train_args():
         '--iou_thresh',
         help='iou threshold in selection process',
         required=False,
-        default=.1,
+        default=.6,
         type=float,
     )
     p.add_argument(
@@ -166,6 +166,7 @@ def save_model(model, val_losses, path_, best_loss, num_iterations):
         path_ = os.path.join(path_, str(num_iterations))
         if not os.path.isdir(path_): os.mkdir(path_)
         path_ = os.path.join(path_, 'model.pt')
+        print(f'Saving new best model at {path_}')
         torch.save(model.state_dict(), path_)
         return mean_loss
     return best_loss

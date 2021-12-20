@@ -135,7 +135,7 @@ class IterativeGeneralizedRCNN(nn.Module):
             detections, losses = self.rcnn(images, targets)
         else:
             detections = self.rcnn(images)
-        # return now if num_iterations is 0 (for incremental training)
+        # return now if num_iterations is 0 (for incremental training
         if num_iterations == 0:
             if self.training:
                 return detections, losses
