@@ -73,30 +73,70 @@ def main():
     mean_val_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
     for num_iterations in range(0, args.num_iterations+1):
         best_val_loss_for_iteration = float('inf')
-        for epoch in range(args.num_epochs):
-            print_header(epoch, args.num_epochs, num_iterations, args.num_iterations)
-            # training
-            # with torch.autograd.set_detect_anomaly(True):
-            tr_losses, tr_times = train_model(train_dataloader, model, device, num_iterations, optimizer)
-            train_times[str(num_iterations)]['forward'].extend(tr_times['forward'])
-            train_times[str(num_iterations)]['backward'].extend(tr_times['backward'])
-            train_losses[str(num_iterations)].append(tr_losses)
-            # validating
-            vl_losses, vl_times = validate_model(val_dataloader, model, device, num_iterations)
-            val_times[str(num_iterations)].extend(vl_times)
-            val_losses[str(num_iterations)].append(vl_losses)
-            # mean loss
-            mean_tr_losses = compute_mean_loss(tr_losses, num_iterations)
-            mean_vl_losses = compute_mean_loss(vl_losses, num_iterations)
-            mean_train_losses[str(num_iterations)].append(mean_tr_losses)
-            mean_val_losses[str(num_iterations)].append(mean_vl_losses)
-            # prints
-            # if epoch % args.print_frequency == 0:
-            print_losses(mean_tr_losses, mean_vl_losses)
-            # save model
-            best_val_loss_for_iteration = save_model(model, mean_vl_losses, 
-                                                    os.path.join(args.model_dir, args.model_name),
-                                                    best_val_loss_for_iteration, num_iterations)
+        epoch = 0
+        while epoch < args.num_epochs:
+            tr_done = False
+            vl_done = False
+            try:
+                print_header(epoch, args.num_epochs, num_iterations, args.num_iterations)
+                # training
+                # with torch.autograd.set_detect_anomaly(True):
+                tr_losses, tr_times = train_model(train_dataloader, model, device, num_iterations, optimizer)
+                train_times[str(num_iterations)]['forward'].extend(tr_times['forward'])
+                train_times[str(num_iterations)]['backward'].extend(tr_times['backward'])
+                train_losses[str(num_iterations)].append(tr_losses)
+                mean_tr_losses = compute_mean_loss(tr_losses, num_iterations)
+                mean_train_losses[str(num_iterations)].append(mean_tr_losses)   
+                tr_done = True
+                # validating
+                vl_losses, vl_times = validate_model(val_dataloader, model, device, num_iterations)
+                val_times[str(num_iterations)].extend(vl_times)
+                val_losses[str(num_iterations)].append(vl_losses)
+                mean_vl_losses = compute_mean_loss(vl_losses, num_iterations)                
+                mean_val_losses[str(num_iterations)].append(mean_vl_losses)
+                vl_done = True
+                # prints
+                # if epoch % args.print_frequency == 0:
+                print_losses(mean_tr_losses, mean_vl_losses)
+                # save model
+                best_val_loss_for_iteration = save_model(model, mean_vl_losses, 
+                                                        os.path.join(args.model_dir, args.model_name),
+                                                        best_val_loss_for_iteration, num_iterations)
+                # incr epoch
+                epoch += 1
+            except RuntimeError: # Optimal batch size hard to predict. If it happens, take back at previous iteration
+                print('Catched CUDA error: Restarting training epoch with smaller batch size ...')
+                # create smaller data loaders
+                train_dataloader.batch_size -= 1
+                train_dataloader = DataLoader(train_dataset, num_workers=4, shuffle=True, 
+                                  batch_size=args.batch_size, 
+                                  collate_fn=collate_fn)
+                val_dataloader = DataLoader(val_dataset, num_workers=4, shuffle=True, 
+                                            batch_size=args.batch_size, 
+                                            collate_fn=collate_fn)
+                # reload previous model
+                if epoch == 0:
+                    if num_iterations == 0: # there will be no model to load ...
+                        model = get_iter_kprcnn_resnet18_oks(args.keep_labels, args.iou_thresh, 
+                                             args.feedback_rate, args.feedback_loss_fn,
+                                             args.interpolate_poses, 
+                                             args.num_conv_blocks_feedback,7).to(device)
+                    else: # load previous iteration best model
+                        model = load_best_model(os.path.join(args.model_dir, args.model_name), num_iterations-1)
+                else: # load last best model for that number of iterations
+                    model = load_best_model(os.path.join(args.model_dir, args.model_name), num_iterations)
+                # ensure metric lists are the right length
+                for lst, flag in zip([train_times[str(num_iterations)]['forward'],
+                                     train_times[str(num_iterations)]['backward'],
+                                     train_losses[str(num_iterations)],
+                                     val_times[str(num_iterations)],
+                                     val_losses[str(num_iterations)],
+                                     mean_train_losses[str(num_iterations)],
+                                     mean_val_losses[str(num_iterations)]],
+                                     [tr_done, tr_done, tr_done, vl_done,
+                                      vl_done, tr_done, vl_done]):
+                    if flag: # if happend then, make it disappear
+                        lst = lst[:-1]             
         model = load_best_model(os.path.join(args.model_dir, args.model_name), num_iterations)
     metrics = {'losses': {'train': train_losses, 'val': val_losses, 'mean_train': mean_train_losses, 'mean_val': mean_val_losses}, 
                'times': {'train': train_times, 'val': val_times}}
