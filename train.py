@@ -71,7 +71,7 @@ def main():
     val_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
     mean_train_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
     mean_val_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
-    for num_iterations in range(1, args.num_iterations+1):
+    for num_iterations in range(0, args.num_iterations+1):
         best_val_loss_for_iteration = float('inf')
         epoch = 0
         while epoch < args.num_epochs:
