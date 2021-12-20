@@ -35,20 +35,23 @@ def pose_interpolation(init_poses: Tensor, target_poses: Tensor, num_iterations:
                     intermediary_poses[numit][nimg][pred_idx][targ_idx] = tmp
     return intermediary_poses
 
-def compute_ious(pred_boxes, target_boxes):
+def compute_ious(pred_boxes: List[Tensor], target_boxes: List[Tensor], detach: bool=False):
     """
     compute_ious: ious between list of detections
 
     Args:
         pred_boxes (List[Tensor[L, 4]]): list of predicted boxes for each image
         target_boxes (List[Tensor[L, 4]]): list of target boxes for each image
+        detach (bool): If true, predicted_boxes are detached
     
     Returns:
         ious (List[Tensor[L,L']]): list of image-wise pairwise ious
     """
     ious = []
-    for nimg in range(len(pred_boxes)): 
+    for nimg in range(len(pred_boxes)):
         p_boxes = pred_boxes[nimg]
+        if detach:
+            p_boxes = p_boxes.detach()
         t_boxes = target_boxes[nimg]
         ious.append(box_iou(p_boxes, t_boxes))
     return ious

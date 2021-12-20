@@ -142,19 +142,20 @@ class IterativeGeneralizedRCNN(nn.Module):
             else:
                 return detections
         # filtering to reduce batch size
-        # detections = self.selector(detections)
+        detections = self.selector(detections)
         i = 0
-        print(detections[0])
         while i < len(detections):
             if detections[i]['boxes'].size(0) <= 1:
                 detections.pop(i)
             else: i += 1
         if len(detections)==0:
             if self.training:
-                losses['feedback'] = {str(i): None for i in range(num_iterations)}
+                losses['feedback'] = {str(i+1): None for i in range(num_iterations)}
                 return detections, losses
             else:
                 return detections
+        # detach predictions to stop gradient
+        detections = [{k: v.detach() for k, v in det.items()} for det in detections]
         # compute prediction areas
         detections = self.detection_area(detections)
         # normalize keypoints (only if is_keypoint_rcnn)
@@ -166,7 +167,7 @@ class IterativeGeneralizedRCNN(nn.Module):
         # iterative refinement
         if self.training:
             detections, feedback_losses = self.iter_net(detections, num_iterations, targets)
-            losses['feedback'] = {str(i): feedback_losses[i] for i in range(num_iterations)}
+            losses['feedback'] = {str(i+1): feedback_losses[i] for i in range(num_iterations)}
         else:
             detections = self.iter_net(detections, num_iterations)
         # inverse normalize
@@ -187,10 +188,7 @@ class IterativeGeneralizedRCNN(nn.Module):
             for k, v in dets.items():
                 for j in range(N):
                     reshaped_dets[j][i][k] = v[j]
-        return reshaped_dets
-            
-        
-        
+        return reshaped_dets         
 
 def get_iter_kprcnn_resnet18_oks(
     keep_labels, 

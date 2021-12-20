@@ -7,6 +7,8 @@ from torch import nn
 from typing import Tuple, List, Dict, Optional
 from torchvision.models.resnet import BasicBlock
 
+EPS = 1e-8
+
 class Oks(nn.Module):
     """
     Oks: torch module to compute OKS
@@ -40,16 +42,14 @@ class Oks(nn.Module):
         ref: https://cocodataset.org/#keypoints-eval
         """
         target_v = target_pose[:,2] # binary !!!
-        print('inp', input_pose.device, 'targ', target_pose.device)
         dists = (input_pose[:,0:2] - target_pose[:,0:2])**2 # (17,2)
-        print('dists before sum', dists.shape)
         dists = dists.sum(dim=-1) # (17)
         if dists.device != self.weights.device:
             self.weights = self.weights.to(dists.device)
-        dists = dists / (2*areas*self.weights**2) # (17)
+        dists = dists / (2*areas*self.weights**2+EPS) # (17)
         # filter visibilities
         oks = torch.exp(-dists)*target_v
-        oks = oks.sum()/target_v.sum()
+        oks = oks.sum()/(target_v.sum()+EPS)
         return oks
 
 class KeypointSignedError(nn.Module):
@@ -77,10 +77,8 @@ class KeypointSignedError(nn.Module):
             signed_error (Tensor[N, *]): signed_error values for each position
         """
         target_v = target_poses[:,2]
-        signed_error = target_tensor - input_tensor
-        signed_error /= areas
-        signed_error *= target_v # binary !
-        signed_error = signed_error.sum() / target_v.sum()    
+        signed_error = (target_tensor - input_tensor)*target_v/(areas+EPS)
+        signed_error = signed_error.sum() / (target_v.sum()+EPS)
         return signed_error
 
 class FeedbackResnet(nn.Module):

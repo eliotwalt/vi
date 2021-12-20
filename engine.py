@@ -23,6 +23,7 @@ def train_model(train_dataloader, model, device, num_iterations, optimizer):
         # to device
         train_images = [image.to(device) for image in train_images]
         train_targets = [{k: v.to(device) for k, v in train_target.items()} for train_target in train_targets]
+        [t['keypoints'].to(torch.float32) for t in train_targets]
         # get initial pose
         if not model.is_keypoint_rcnn:
             init_pose = train_dataloader.mean_pose
@@ -44,9 +45,9 @@ def train_model(train_dataloader, model, device, num_iterations, optimizer):
             loss = sum(loss for loss in losses.values())
             loss.backward()
         else: # iteration >= 1 -> train last feedback iteration (if present)
-            if losses['feedback'][str(num_iterations-1)] is not None: # could not be the case if the selector return list of None (some imgs have 0 keypoints for some reason)
+            if losses['feedback'][str(num_iterations)] is not None: # could not be the case if the selector return list of None (some imgs have 0 keypoints for some reason)
                 step = True
-                loss = losses['feedback'][str(num_iterations-1)]
+                loss = losses['feedback'][str(num_iterations)]
                 loss.backward()
         if step:
             optimizer.step()
@@ -59,7 +60,7 @@ def train_model(train_dataloader, model, device, num_iterations, optimizer):
     return tr_losses, tr_times
 
 def validate_model(val_dataloader, model, device, num_iterations):
-    losses = []
+    val_losses = []
     val_times = []
     print('Validating ...')
     pbar = tqdm(val_dataloader)
@@ -67,6 +68,7 @@ def validate_model(val_dataloader, model, device, num_iterations):
         # to device
         val_images = [image.to(device) for image in val_images]
         val_targets = [{k: v.to(device) for k, v in val_target.items()} for val_target in val_targets]
+        [t['keypoints'].to(torch.float32) for t in val_targets]
         # get initial pose
         if not model.is_keypoint_rcnn:
             init_pose = val_dataloader.mean_pose

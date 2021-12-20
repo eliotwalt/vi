@@ -68,7 +68,7 @@ class BaseIterativeNet(nn.Module):
         batch_size, K, _ = poses.shape
         features_poses = []
         visibilities = []
-        print('theerror input poses', poses.__class__, len(poses))
+        # print('theerror input poses', poses.__class__, len(poses))
         for keypoint in poses:
             x, y, v = keypoint[:,0], keypoint[:,1], keypoint[:,2]
             features = []
@@ -78,7 +78,7 @@ class BaseIterativeNet(nn.Module):
                 features.append(torch.full((1,1,features_dim,features_dim), v_val.item()))
             features = torch.cat(features, dim=1)
             features_poses.append(features)
-        print('theerror before cat', features_poses.__class__, len(features_poses))
+        # print('theerror before cat', features_poses.__class__, len(features_poses))
         features_poses = torch.cat(features_poses, dim=0)
         return features_poses
 
@@ -108,7 +108,7 @@ class BaseIterativeNet(nn.Module):
         Returns:
             loss (Tensor[]): average feedback loss
         """
-        loss = 0
+        loss = []
         for nimg in range(len(pred_poses)): # loop on input images
             device = pred_poses[nimg].device
             if intermediary_poses is not None:
@@ -126,10 +126,13 @@ class BaseIterativeNet(nn.Module):
                         targ_feedback = self.feedback_fn(interm_pose, targ_pose, target_areas[nimg][j])
                     else:
                         targ_feedback = self.default_feedback * torch.ones_like(pred_feedback).detach()
-                    loss_ij = self.feedback_loss_fn(pred_feedback, targ_feedback)
-                    loss_ij += F.binary_cross_entropy(pred_pose[:,2], targ_pose[:,2])
-                    loss_ij *= ious[nimg][i][j]
-                    loss += loss_ij
+                    loss_ij = ious[nimg][i][j] * (self.feedback_loss_fn(pred_feedback, targ_feedback) + \
+                                                  F.binary_cross_entropy(pred_pose[:,2], targ_pose[:,2]))
+                    # loss_ij += F.binary_cross_entropy(pred_pose[:,2], targ_pose[:,2])
+                    # loss_ij *= ious[nimg][i][j]
+                    # loss += loss_ij
+                    loss.append(loss_ij)
+        loss = sum(loss)
         return loss
 
     def forward(
@@ -177,7 +180,7 @@ class BaseIterativeNet(nn.Module):
             target_poses = [t['keypoints'] for t in targets] # List[Tensor[L',K,3]]
             target_areas = [t['area'] for t in targets] # List[Tensor[1]]
             losses = [] # List[Tensor[1]]
-            boxes = [d['boxes'] for d in detections] # List[Tensor[L, 4]]
+            boxes = [d['boxes'].detach() for d in detections] # List[Tensor[L, 4]]
             target_boxes = [t['boxes'] for t in targets] # List[Tensor[L', 4]]
             ious = compute_ious(boxes, target_boxes)
         # make batches
@@ -197,8 +200,6 @@ class BaseIterativeNet(nn.Module):
             for i in range(M):
                 poses[i].append(poses_list[i])
                 feedbacks[i].append(feedbacks_list[i])
-            # poses[iteration+1] = list(poses_batch.split(idx_list, 0)) # Tensor[L*M, 256, D, D] -> List[Tensor[L, 256, D, D]]
-            # feedbacks[iteration] = list(feedback_batch.split(idx_list, 0)) # Tensor[L*M, K, 3] -> List[Tensor[L, K, 3]]
             if self.training:
                 loss_kwargs = {'pred_poses': poses_list, 'target_poses': target_poses, 
                                'pred_feedbacks': feedbacks_list, 'ious': ious,
@@ -206,15 +207,6 @@ class BaseIterativeNet(nn.Module):
                 if self.interpolate_poses:
                     loss_kwargs['intermediary_poses'] = intermediary_poses[iteration]
                 loss = self.compute_loss(**loss_kwargs)
-                # # compute target feedback
-                # if self.interpolate_poses:
-                #     target_feedback_batch = self.feeback_fn(intermediary_poses[iteration], target_poses_batch, target_areas).detach()
-                #     intermediary_poses = intermediary_poses[iteration].split(target_idx_list, 0)
-                # else:
-                #     target_feedback_batch = self.default_feedback*torch.ones_like(target_poses_batch).detach()
-                #     intermediary_poses = target_poses_batch.split(target_idx_list, 0)
-                # target_feedback = target_feedback_batch.split(target_idx_list, 0)
-                # loss = self.compute_loss(feedbacks[-1], target_feedback, poses[-1], intermediary_poses, ious)
                 losses.append(loss)
         # complete detections
         for i in range(M):
@@ -271,7 +263,7 @@ class EnergyAscentIterativeNet(BaseIterativeNet):
         poses_features.requires_grad_(True)
         inp = torch.cat([features_batch, poses_features], dim=1)
         feedback = self.net(inp)
-        grad = torch.autograd.grad(feedback.mean(), poses_features)[0]
+        grad = torch.autograd.grad(feedback.mean(), poses_features, retain_graph=True)[0]
         poses_features = poses_features + self.feedback_rate*grad.detach()
         pooled_poses = F.avg_pool2d(poses_features, kernel_size=poses_features.shape[-1])
         x = F.relu(torch.cat([pooled_poses[:,i] for i in range(0, pooled_poses.shape[1], 3)], dim=1))

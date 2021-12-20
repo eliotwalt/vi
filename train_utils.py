@@ -6,6 +6,7 @@ import torchvision
 import torchvision.transforms as T
 import os
 import pickle
+from lib.iterative_rcnn import get_iter_kprcnn_resnet18_oks, get_iter_kprcnn_resnet18_ief, get_kprcnn_resnet50
 
 def get_transform():
     return T.Compose([T.ToTensor()])
@@ -342,20 +343,23 @@ def save_at_root(obj, path):
 
 def save_model(model, val_losses, path_, best_loss, num_iterations):
     '''If mean val_losses smaller than best_loss save model and return new best'''
-    mean_val_loss = sum(val_losses)/len(val_losses)
-    if mean_val_loss < best_loss:
-        path_ = os.path.join(path_, num_iterations)
-        path_ = os.path,join(path_, 'model.pt')
+    mean_loss = [v for v in val_losses.values()]
+    mean_loss = sum(mean_loss)/len(mean_loss)
+    if mean_loss < best_loss:
+        path_ = os.path.join(path_, str(num_iterations))
+        if not os.path.isdir(path_): os.mkdir(path_)
+        path_ = os.path.join(path_, 'model.pt')
         torch.save(model, path_)
-        return mean_val_loss
+        return mean_loss
     return best_loss
 
 def load_best_model(path_, num_iterations):
-    from lib.iterative_rcnn import get_iter_kprcnn_resnet18_oks, get_iter_kprcnn_resnet18_ief, get_kprcnn_resnet50
     with open(os.path.join(path_, 'args.pkl'), 'rb') as h:
         args = pickle.load(h)
-    path_ = os.path.join(path_, num_iterations)
+    path_ = os.path.join(path_, str(num_iterations))
+    if not os.path.isdir(path_): os.mkdir(path_)
     path_ = os.path.join(path_, 'model.pt')
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     if args.model == 'iter_kprcnn_resnet18_oks':
         model = get_iter_kprcnn_resnet18_oks(args.keep_labels, args.iou_thresh, 
                                              args.feedback_rate, args.feedback_loss_fn,
@@ -369,6 +373,28 @@ def load_best_model(path_, num_iterations):
         raise AttributeError(f'`{args.model}` not recognized as a TRAINABLE model.')
     return model
     
+def compute_mean_loss(losses, iteration):
+    if iteration == 0:
+        keys = list(losses[0].keys())
+        n = {k: len(losses) for k in keys}
+    else:
+        keys = [str(i) for i in range(1,iteration+1)]
+        n = {k: 0 for k in keys}
+    mean_losses = {k: 0 for k in keys}
+    for loss in losses:
+        for key in keys:
+            if iteration == 0:
+                mean_losses[key] += loss[key]
+            else:
+                if loss['feedback'][key] is not None:
+                    mean_losses[key] += loss['feedback'][key]
+                    n[key] += 1
+    for k,v in mean_losses.items():
+        if n[k] == 0: # all feedback losses were None
+            mean_losses[k] = 1e7 # arbitrary recognizable large number
+        else:
+            mean_losses[k] /= n[k]
+    return mean_losses
 
 if __name__ == '__main__':
     args = get_train_args()
