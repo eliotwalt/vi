@@ -4,7 +4,9 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision.datasets import CocoDetection
 from torch.optim import Adam, lr_scheduler
-from lib.iterative_rcnn import get_iter_kprcnn_resnet18_oks, get_iter_kprcnn_resnet18_ief, get_kprcnn_resnet50
+from lib.iterative_rcnn import get_iter_kprcnn_resnet18_oks, get_iter_kprcnn_resnet18_ief, \
+                               get_iter_kprcnn_resnet50_oks, get_iter_kprcnn_resnet50_ief, \
+                               get_kprcnn_resnet50
 from train_utils import get_train_args, get_transform, \
                         get_target_transform, save_model, \
                         save_at_root, load_best_model, \
@@ -14,10 +16,11 @@ from engine import train_model, validate_model
 import os
 import warnings
 warnings.filterwarnings("ignore")
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 def print_header(epoch, num_epochs, iteration, num_iterations):
     print('*'*100)
-    print('Iteration: {0}/{1}, Epoch {2}/{3}'.format(iteration+1, num_iterations+1, epoch+1, num_epochs))
+    print('Iteration: {0}/{1}, Epoch {2}/{3}'.format(iteration, num_iterations, epoch+1, num_epochs))
 
 def print_losses(train_loss, val_loss):
     print('|--- Training losses):')
@@ -40,10 +43,23 @@ def main():
                                              args.feedback_rate, args.feedback_loss_fn,
                                              args.interpolate_poses, 
                                              args.num_conv_blocks_feedback,7).to(device)
+        first_iter = 0
     elif args.model == 'iter_kprcnn_resnet18_ief':
         model = get_iter_kprcnn_resnet18_ief(args.keep_labels, args.iou_thresh, 
                                              args.feedback_rate, args.feedback_loss_fn,
                                              args.interpolate_poses, args.num_conv_blocks_feedback,7).to(device)
+        first_iter = 0
+    elif args.model == 'iter_kprcnn_resnet50_oks':
+        model = get_iter_kprcnn_resnet50_oks(args.keep_labels, args.iou_thresh, 
+                                             args.feedback_rate, args.feedback_loss_fn,
+                                             args.interpolate_poses, 
+                                             args.num_conv_blocks_feedback,7).to(device)
+        first_iter = 1
+    elif args.model == 'iter_kprcnn_resnet50_ief':
+        model = get_iter_kprcnn_resnet50_ief(args.keep_labels, args.iou_thresh, 
+                                             args.feedback_rate, args.feedback_loss_fn,
+                                             args.interpolate_poses, args.num_conv_blocks_feedback,7).to(device)
+        first_iter = 1
     else:
         raise AttributeError(f'`{args.model}` not recognized as a TRAINABLE model.')
 
@@ -71,7 +87,7 @@ def main():
     val_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
     mean_train_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
     mean_val_losses = {str(iteration): [] for iteration in range(args.num_iterations+1)}
-    for num_iterations in range(0, args.num_iterations+1):
+    for num_iterations in range(first_iter, args.num_iterations+1):
         best_val_loss_for_iteration = float('inf')
         epoch = 0
         while epoch < args.num_epochs:
@@ -81,7 +97,7 @@ def main():
                 print_header(epoch, args.num_epochs, num_iterations, args.num_iterations)
                 # training
                 # with torch.autograd.set_detect_anomaly(True):
-                tr_losses, tr_times, empty = train_model(train_dataloader, model, device, num_iterations, optimizer)
+                tr_losses, tr_times, empty = train_model(train_dataloader, model, device, num_iterations, optimizer, args.max_ds_size)
                 train_times[str(num_iterations)]['forward'].extend(tr_times['forward'])
                 train_times[str(num_iterations)]['backward'].extend(tr_times['backward'])
                 train_losses[str(num_iterations)].append(tr_losses)

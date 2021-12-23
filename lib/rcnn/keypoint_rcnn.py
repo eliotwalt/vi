@@ -162,5 +162,7 @@ def keypointrcnn_resnet_fpn(backbone_arch):
     if backbone_arch == 'resnet50':
         state_dict = load_state_dict_from_url(model_urls["keypointrcnn_resnet50_fpn_coco_legacy"])
         model.load_state_dict(state_dict)
-        overwrite_eps(0.0)
+        overwrite_eps(model=model, eps=0.0)
+        for params in model.parameters():
+            params.requires_grad = False
     return model

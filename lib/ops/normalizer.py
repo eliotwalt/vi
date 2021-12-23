@@ -54,7 +54,7 @@ def inverse_normalize(normalized_detections: List[Dict[str, Tensor]]):
     """
     for k, normalized_detection in enumerate(normalized_detections):
         for numit in range(len(normalized_detection['keypoints'])):
-            area = normalized_detection['area'][numit]
+            area = normalized_detection['area'][-1]
             kps = normalized_detection['keypoints'][numit].clone()
             if len(area.shape) == 1: area.reshape(-1,1)
             for i in range(2):

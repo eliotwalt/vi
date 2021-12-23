@@ -6,7 +6,9 @@ import torchvision
 import torchvision.transforms as T
 import os
 import pickle
-from lib.iterative_rcnn import get_iter_kprcnn_resnet18_oks, get_iter_kprcnn_resnet18_ief, get_kprcnn_resnet50
+from lib.iterative_rcnn import get_iter_kprcnn_resnet18_oks, get_iter_kprcnn_resnet18_ief, \
+                               get_iter_kprcnn_resnet50_oks, get_iter_kprcnn_resnet50_ief, \
+                               get_kprcnn_resnet50
 
 def get_transform():
     return T.Compose([T.ToTensor()])
@@ -134,6 +136,13 @@ def get_train_args():
         default=10,
         type=int,
     )
+    p.add_argument(
+        '--max_ds_size',
+        help='maximum dataset size',
+        required=False,
+        default=8000,
+        type=int
+    )
     # parse argv
     args = p.parse_args()
     # create directories
@@ -183,10 +192,23 @@ def load_best_model(path_, num_iterations):
                                              args.feedback_rate, args.feedback_loss_fn,
                                              args.interpolate_poses, 
                                              args.num_conv_blocks_feedback,7).to(device)
+        first_iter = 0
     elif args.model == 'iter_kprcnn_resnet18_ief':
         model = get_iter_kprcnn_resnet18_ief(args.keep_labels, args.iou_thresh, 
                                              args.feedback_rate, args.feedback_loss_fn,
                                              args.interpolate_poses, args.num_conv_blocks_feedback,7).to(device)
+        first_iter = 0
+    elif args.model == 'iter_kprcnn_resnet50_oks':
+        model = get_iter_kprcnn_resnet50_oks(args.keep_labels, args.iou_thresh, 
+                                             args.feedback_rate, args.feedback_loss_fn,
+                                             args.interpolate_poses, 
+                                             args.num_conv_blocks_feedback,7).to(device)
+        first_iter = 1
+    elif args.model == 'iter_kprcnn_resnet50_ief':
+        model = get_iter_kprcnn_resnet50_ief(args.keep_labels, args.iou_thresh, 
+                                             args.feedback_rate, args.feedback_loss_fn,
+                                             args.interpolate_poses, args.num_conv_blocks_feedback,7).to(device)
+        first_iter = 1
     else:
         raise AttributeError(f'`{args.model}` not recognized as a TRAINABLE model.')
     print('loading model from:', path_)

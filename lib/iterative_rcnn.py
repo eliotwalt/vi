@@ -222,5 +222,38 @@ def get_iter_kprcnn_resnet18_ief(
     iter_net = AdditiveIterativeNet(feedback_net, feedback_rate, feedback_loss_fn, interpolate_poses, feedback_fn)
     return IterativeGeneralizedRCNN(rcnn, iter_net, selector)
 
+def get_iter_kprcnn_resnet50_oks(
+    keep_labels, 
+    iou_thresh, 
+    feedback_rate, 
+    feedback_loss_fn,
+    interpolate_poses,
+    num_conv_blocks_feedback,
+    features_dim=7
+):
+    rcnn = keypointrcnn_resnet_fpn('resnet50')
+    selector = ObjectSelector(keep_labels, iou_thresh)
+    feedback_fn = Oks(coco_weights)
+    feedback_net = FeedbackResnet(out_channels=len(coco_weights)*3, features_dim=features_dim, num_blocks=num_conv_blocks_feedback)
+    iter_net = EnergyAscentIterativeNet(feedback_net, feedback_rate, feedback_loss_fn, interpolate_poses, feedback_fn)
+    return IterativeGeneralizedRCNN(rcnn, iter_net, selector)
+
+def get_iter_kprcnn_resnet50_ief(
+    keep_labels, 
+    iou_thresh, 
+    feedback_rate, 
+    feedback_loss_fn,
+    interpolate_poses,
+    num_conv_blocks_feedback,
+    features_dim=7
+):
+    rcnn = keypointrcnn_resnet_fpn('resnet50')
+    selector = ObjectSelector(keep_labels, iou_thresh)
+    feedback_fn = KeypointSignedError()
+    feedback_net = FeedbackResnet(out_channels=len(coco_weights)*3, features_dim=features_dim, num_blocks=num_conv_blocks_feedback)
+    iter_net = AdditiveIterativeNet(feedback_net, feedback_rate, feedback_loss_fn, interpolate_poses, feedback_fn)
+    return IterativeGeneralizedRCNN(rcnn, iter_net, selector)
+
+
 def get_kprcnn_resnet50():
     return keypointrcnn_resnet_fpn('resnet50')

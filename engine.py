@@ -14,12 +14,13 @@ def nested_detach(losses):
     else:
         return None
 
-def train_model(train_dataloader, model, device, num_iterations, optimizer):
+def train_model(train_dataloader, model, device, num_iterations, optimizer, max_ds_size):
     tr_losses = []
     tr_times = {'forward': [], 'backward': []}
     empties = 0
     print('Training ...')
     pbar = tqdm(train_dataloader)
+    i = 0
     for train_images, train_targets in pbar:
         # to device
         train_images = [image.to(device) for image in train_images]
@@ -56,12 +57,23 @@ def train_model(train_dataloader, model, device, num_iterations, optimizer):
         tr_times['backward'].append(t1-t0)
         # detach and get float and append all losses (rcnn+feedback)
         losses = nested_detach(losses)
+        pbar_kwargs = {'i': f'{i+1}/{max_ds_size}'}
+        for k,v in losses.items():
+            if num_iterations == 0:
+                if k != 'feedback':
+                    pbar_kwargs[k]=v 
+            else:
+                if k == 'feedback':
+                    pbar_kwargs[k]=v
         tr_losses.append(losses)        
-        pbar.set_postfix(losses)
+        pbar.set_postfix(pbar_kwargs)
         if num_iterations == 0:
             for det in detections:
                 if len(det['boxes'] == 0):
                     empties += 1
+        i += 1
+        if i == max_ds_size:
+            break
     return tr_losses, tr_times, empties/len(train_dataloader)/train_dataloader.batch_size
 
 def validate_model(val_dataloader, model, device, num_iterations):
