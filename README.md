@@ -37,7 +37,9 @@ usage: train.py [-h] --model MODEL --batch_size BATCH_SIZE --lr LR --num_iterati
 
 optional arguments:
   -h, --help            show this help message and exit
-  --model MODEL         (required) model type: iter_kprcnn_resnet18_oks,                                           iter_kprcnn_resnet18_ief, iter_kprcnn_resnet50_oks,                                       iter_kprcnn_resnet50_ief
+  --model MODEL         (required) model type: iter_kprcnn_resnet18_oks,
+                        iter_kprcnn_resnet18_ief, iter_kprcnn_resnet50_oks,
+                        iter_kprcnn_resnet50_ief
   --batch_size BATCH_SIZE
                         (required) batch size
   --lr LR               (required) learning rate
@@ -63,7 +65,8 @@ optional arguments:
   --iou_thresh IOU_THRESH
                         iou threshold in selection process
   --feedback_loss_fn FEEDBACK_LOSS_FN
-                        loss function for feedback prediction, possible values are "l2",                           "l1" and "smooth_l1
+                        loss function for feedback prediction, possible values are "l2",
+                        "l1" and "smooth_l1"
   --feedback_rate FEEDBACK_RATE
                         step size of feedback updates
   --interpolate_poses   if specified, intermediary poses are interpolated
